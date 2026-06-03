@@ -1,0 +1,23 @@
+{
+  "profiles": {
+    "Работа": {
+      "work": 60,
+      "rest": 10
+    },
+    "Учёба": {
+      "work": 50,
+      "rest": 10
+    },
+    "Спорт": {
+      "work": 45,
+      "rest": 15
+    }
+  },
+  "active_profile": "Работа",
+  "settings": {
+    "dnd": false,
+    "always_on_top": false,
+    "sound_enabled": true,
+    "auto_switch": false
+  }
+}
