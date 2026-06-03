@@ -1,8 +1,8 @@
 """
-ui/components/settings_panel.py — Виджет: панель настроек профиля.
+ui/components/settings_panel.py — Панель настроек профиля (v3).
 
-Поля «Работа (мин)» и «Отдых (мин)», кнопка «Сохранить»,
-чекбокс «Поверх окон», строка статуса.
+Поля: Название сцены + мин/сек для работы и отдыха.
+on_save(name: str, work_total_seconds: int, break_total_seconds: int)
 """
 
 from __future__ import annotations
@@ -15,86 +15,84 @@ from ui.theme import COLORS, FONTS
 
 class SettingsPanel(ctk.CTkFrame):
     """
-    Панель настроек профиля + общих настроек приложения.
-
-    Коллбэки:
-        on_save(work_min: int, break_min: int) — пользователь сохранил профиль
-        on_toggle_top(value: bool)             — изменён чекбокс «Поверх окон»
-
-    Пример:
-        panel = SettingsPanel(
-            parent,
-            on_save=controller.save_profile_settings,
-            on_toggle_top=controller.set_always_on_top,
-        )
-        panel.load_profile(work_minutes=60, break_minutes=10)
-        panel.load_settings(always_on_top=False)
+    Панель настроек: название сцены + поля мин+сек.
     """
 
     def __init__(
         self,
         parent,
-        on_save: Callable[[int, int], None],
+        on_save: Callable[[str, int, int], None],
         on_toggle_top: Callable[[bool], None],
         **kwargs,
     ):
         super().__init__(parent, fg_color="transparent", **kwargs)
-
         self._on_save       = on_save
         self._on_toggle_top = on_toggle_top
+        self._build()
 
-        # Заголовок секции
+    def _build(self) -> None:
+        grid = ctk.CTkFrame(self, fg_color=COLORS["panel_light"], corner_radius=10)
+        grid.pack(padx=12, pady=4)
+
+        # ── Название сцены ─────────────────────────────────────────
         ctk.CTkLabel(
-            self,
-            text="НАСТРОЙКИ ПРОФИЛЯ",
-            font=FONTS["label"],
-            text_color=COLORS["subtext"],
-        ).pack()
+            grid, text="Название сцены",
+            font=FONTS["label_bold"], text_color=COLORS["accent_text"],
+        ).grid(row=0, column=0, padx=(14, 6), pady=(10, 4), sticky="w")
 
-        # Сетка полей ввода
-        grid = ctk.CTkFrame(self, fg_color="transparent")
-        grid.pack(pady=8)
-
-        # Работа (мин)
-        ctk.CTkLabel(
-            grid, text="Работа (мин)",
-            font=FONTS["label"],
-            text_color=COLORS["subtext"],
-        ).grid(row=0, column=0, padx=12, pady=4, sticky="w")
-        self._entry_work = ctk.CTkEntry(
-            grid, width=70, font=FONTS["entry"],
-            fg_color=COLORS["panel"], border_color=COLORS["border"],
-            justify="center",
+        self._entry_name = ctk.CTkEntry(
+            grid, width=174, height=28,
+            font=FONTS["entry"],
+            fg_color=COLORS["bg"],
+            border_color=COLORS["border_glow"],
+            text_color=COLORS["text"],
         )
-        self._entry_work.grid(row=0, column=1, padx=12)
+        self._entry_name.grid(row=0, column=1, columnspan=2, padx=(0, 14), pady=(10, 4))
 
-        # Отдых (мин)
+        # ── Заголовки колонок ──────────────────────────────────────
+        for col, text in enumerate(["", "мин", "сек"], start=1):
+            ctk.CTkLabel(
+                grid, text=text,
+                font=FONTS["label"], text_color=COLORS["subtext"],
+            ).grid(row=1, column=col, padx=8, pady=(2, 0))
+
+        # ── Строка «Работа» ────────────────────────────────────────
         ctk.CTkLabel(
-            grid, text="Отдых (мин)",
-            font=FONTS["label"],
-            text_color=COLORS["subtext"],
-        ).grid(row=1, column=0, padx=12, pady=4, sticky="w")
-        self._entry_rest = ctk.CTkEntry(
-            grid, width=70, font=FONTS["entry"],
-            fg_color=COLORS["panel"], border_color=COLORS["border"],
-            justify="center",
-        )
-        self._entry_rest.grid(row=1, column=1, padx=12)
+            grid, text="Работа",
+            font=FONTS["label_bold"], text_color=COLORS["work"],
+        ).grid(row=2, column=0, padx=(14, 4), pady=6, sticky="w")
 
-        # Кнопка сохранить
+        self._entry_work_min = self._make_entry(grid)
+        self._entry_work_min.grid(row=2, column=1, padx=8, pady=6)
+
+        self._entry_work_sec = self._make_entry(grid)
+        self._entry_work_sec.grid(row=2, column=2, padx=(4, 14), pady=6)
+
+        # ── Строка «Отдых» ─────────────────────────────────────────
+        ctk.CTkLabel(
+            grid, text="Отдых",
+            font=FONTS["label_bold"], text_color=COLORS["rest"],
+        ).grid(row=3, column=0, padx=(14, 4), pady=(0, 10), sticky="w")
+
+        self._entry_rest_min = self._make_entry(grid)
+        self._entry_rest_min.grid(row=3, column=1, padx=8, pady=(0, 10))
+
+        self._entry_rest_sec = self._make_entry(grid)
+        self._entry_rest_sec.grid(row=3, column=2, padx=(4, 14), pady=(0, 10))
+
+        # ── Кнопка сохранить ───────────────────────────────────────
         ctk.CTkButton(
             self,
-            text="💾  Сохранить профиль",
-            width=200,
-            height=34,
-            font=FONTS["btn_xs"],
+            text="💾  Сохранить сцену",
+            width=220, height=34,
+            font=FONTS["btn_sm"],
             fg_color=COLORS["btn_neutral"],
-            hover_color=COLORS["btn_hover"],
-            corner_radius=6,
+            hover_color=COLORS["border_glow"],
+            corner_radius=8,
             command=self._on_save_clicked,
         ).pack(pady=(8, 4))
 
-        # Чекбокс «Поверх окон»
+        # ── Чекбокс «Поверх окон» ──────────────────────────────────
         self._var_top = ctk.BooleanVar(value=False)
         ctk.CTkCheckBox(
             self,
@@ -107,57 +105,83 @@ class SettingsPanel(ctk.CTkFrame):
             command=self._on_top_changed,
         ).pack(pady=4)
 
-        # Строка статуса
+        # ── Статусная строка ───────────────────────────────────────
         self._lbl_status = ctk.CTkLabel(
-            self,
-            text="Нажмите СТАРТ",
-            font=FONTS["label"],
-            text_color=COLORS["subtext"],
+            self, text="",
+            font=FONTS["label"], text_color=COLORS["subtext"],
         )
-        self._lbl_status.pack(pady=(8, 0))
+        self._lbl_status.pack(pady=(2, 0))
+
+    @staticmethod
+    def _make_entry(parent) -> ctk.CTkEntry:
+        return ctk.CTkEntry(
+            parent, width=58, height=28,
+            font=FONTS["entry"],
+            fg_color=COLORS["bg"],
+            border_color=COLORS["border"],
+            text_color=COLORS["text"],
+            justify="center",
+        )
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
-    def load_profile(self, work_minutes: int, break_minutes: int) -> None:
-        """Заполнить поля ввода значениями из профиля."""
-        self._entry_work.delete(0, "end")
-        self._entry_work.insert(0, str(work_minutes))
-        self._entry_rest.delete(0, "end")
-        self._entry_rest.insert(0, str(break_minutes))
+    def load_profile(
+        self,
+        name: str = "",
+        work_minutes: int = 0,
+        work_seconds: int = 0,
+        break_minutes: int = 0,
+        break_seconds: int = 0,
+    ) -> None:
+        self._set_entry(self._entry_name, name)
+        self._set_entry(self._entry_work_min, str(work_minutes))
+        self._set_entry(self._entry_work_sec, str(work_seconds))
+        self._set_entry(self._entry_rest_min, str(break_minutes))
+        self._set_entry(self._entry_rest_sec, str(break_seconds))
 
     def load_settings(self, always_on_top: bool) -> None:
-        """Синхронизировать чекбокс с AppSettings."""
         self._var_top.set(always_on_top)
 
     def set_status(self, text: str, color: str | None = None) -> None:
-        """Обновить строку статуса."""
         cfg = {"text": text}
         if color:
             cfg["text_color"] = color
         self._lbl_status.configure(**cfg)
 
-    def flash_status(self, text: str, color: str, master, delay_ms: int = 2000) -> None:
-        """Показать временное сообщение, затем вернуть 'Нажмите СТАРТ'."""
+    def flash_status(self, text: str, color: str, master, delay_ms: int = 2500) -> None:
         self.set_status(text, color)
-        master.after(
-            delay_ms,
-            lambda: self.set_status("Нажмите СТАРТ", COLORS["subtext"]),
-        )
+        master.after(delay_ms, lambda: self.set_status("", None))
 
     # ------------------------------------------------------------------
     # Приватные обработчики
     # ------------------------------------------------------------------
 
     def _on_save_clicked(self) -> None:
+        name = self._entry_name.get().strip()
+        if not name:
+            self.set_status("⚠ Введите название сцены", COLORS["warning"])
+            return
         try:
-            work  = int(self._entry_work.get())
-            rest  = int(self._entry_rest.get())
+            work_min = int(self._entry_work_min.get() or "0")
+            work_sec = int(self._entry_work_sec.get() or "0")
+            rest_min = int(self._entry_rest_min.get() or "0")
+            rest_sec = int(self._entry_rest_sec.get() or "0")
         except ValueError:
             self.set_status("⚠ Введите целые числа", COLORS["warning"])
             return
-        self._on_save(work, rest)
+
+        if work_sec > 59 or rest_sec > 59:
+            self.set_status("⚠ Секунды: от 0 до 59", COLORS["warning"])
+            return
+
+        self._on_save(name, work_min * 60 + work_sec, rest_min * 60 + rest_sec)
 
     def _on_top_changed(self) -> None:
         self._on_toggle_top(self._var_top.get())
+
+    @staticmethod
+    def _set_entry(entry: ctk.CTkEntry, value: str) -> None:
+        entry.delete(0, "end")
+        entry.insert(0, value)

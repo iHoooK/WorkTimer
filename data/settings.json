@@ -1,23 +1,17 @@
 {
   "profiles": {
     "Работа": {
-      "work": 60,
-      "rest": 10
-    },
-    "Учёба": {
-      "work": 50,
-      "rest": 10
+      "work_seconds": 3600,
+      "rest_seconds": 600
     },
     "Спорт": {
-      "work": 45,
-      "rest": 15
+      "work_seconds": 2700,
+      "rest_seconds": 900
+    },
+    "Пишем игру": {
+      "work_seconds": 1500,
+      "rest_seconds": 120
     }
   },
-  "active_profile": "Работа",
-  "settings": {
-    "dnd": false,
-    "always_on_top": false,
-    "sound_enabled": true,
-    "auto_switch": false
-  }
+  "active_profile": "Пишем игру"
 }

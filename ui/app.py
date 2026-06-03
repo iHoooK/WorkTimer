@@ -21,6 +21,7 @@ from core.timer    import EVENT_TICK, EVENT_FINISHED, EVENT_STARTED
 from core.timer    import EVENT_PAUSED, EVENT_RESUMED, EVENT_STOPPED
 from core.profiles import Profile, ProfileRepository
 from core.settings import AppSettings, SettingsRepository
+from ui.theme      import COLORS
 
 if TYPE_CHECKING:
     from infrastructure.sound         import SoundService
@@ -59,6 +60,7 @@ class AppController:
         notifications: "NotificationService",
         tray:          "TrayManager",
         hotkeys:       "HotkeyManager",
+        obs=None,      # Optional[OBSServer] — не импортируем напрямую, чтобы избежать цикла
     ) -> None:
         self._bus           = bus
         self._timer         = timer
@@ -68,6 +70,7 @@ class AppController:
         self._notifications = notifications
         self._tray          = tray
         self._hotkeys       = hotkeys
+        self._obs           = obs        # OBSServer | None
 
         # Ссылка на окно — устанавливается после создания MainWindow
         self._window: Optional["MainWindow"] = None
@@ -134,10 +137,14 @@ class AppController:
         self._bus.subscribe(EVENT_STOPPED,  self._on_state_change)
 
     def _on_tick(self, event: Event) -> None:
-        """Каждую секунду: обновить UI и трей."""
+        """Каждую секунду: обновить UI, трей, OBS."""
         state: TimerState = event.data
         if self._window:
             self._window.after(0, lambda s=state: self._window.update_timer(s))
+
+        # OBS-сервер
+        if self._obs:
+            self._obs.update(state)
 
         # Обновить подсказку трея
         mode_text = "Работа" if state.mode == TimerMode.WORK else "Отдых"
@@ -202,10 +209,12 @@ class AppController:
             )
 
     def _on_state_change(self, event: Event) -> None:
-        """При любом изменении фазы таймера — обновить кнопки."""
+        """При любом изменении фазы — обновить UI и OBS."""
         state: TimerState = event.data
         if self._window:
             self._window.after(0, lambda s=state: self._window.update_timer(s))
+        if self._obs:
+            self._obs.update(state)
 
     def _on_confirm_cancelled(self) -> None:
         """Пользователь нажал «Отмена» в диалоге после завершения."""
@@ -269,38 +278,48 @@ class AppController:
         self._refresh_profiles_ui()
         self._refresh_settings_ui()
 
-    def save_profile_settings(self, work_minutes: int, break_minutes: int) -> None:
-        """Сохранить новые значения активного профиля."""
-        active = self._profiles.get_active()
+    def save_profile_settings(self, name: str, work_total_seconds: int, break_total_seconds: int) -> None:
+        """Сохранить / переименовать активный профиль."""
+        active   = self._profiles.get_active()
+        old_name = active.name
         try:
             new_profile = Profile(
-                name=active.name,
-                work_minutes=work_minutes,
-                break_minutes=break_minutes,
+                name=name,
+                work_seconds=work_total_seconds,
+                break_seconds=break_total_seconds,
             )
             new_profile.validate()
         except ValueError as e:
             if self._window:
                 self._window.settings_panel.flash_status(
-                    f"⚠ {e}", None, self._window
+                    f"⚠ {e}", COLORS["warning"], self._window
                 )
             return
 
         self.stop_timer()
-        self._profiles.save(new_profile)
 
-        # Обновить UI с подтверждением
+        if name != old_name:
+            # Переименование: сохраняем под новым именем, удаляем старое
+            self._profiles.save(new_profile)
+            try:
+                self._profiles.delete(old_name)
+            except (KeyError, RuntimeError):
+                pass
+            self._profiles.set_active(name)
+        else:
+            self._profiles.save(new_profile)
+
+        self._refresh_profiles_ui()
         self._refresh_settings_ui()
         if self._window:
-            from ui.theme import COLORS
             self._window.settings_panel.flash_status(
                 "✔ Сохранено", COLORS["success"], self._window
             )
 
-    def create_profile(self, name: str, work_minutes: int, break_minutes: int) -> None:
+    def create_profile(self, name: str, work_total_seconds: int, break_total_seconds: int) -> None:
         """Создать новый профиль и сделать его активным."""
         try:
-            profile = Profile(name=name, work_minutes=work_minutes, break_minutes=break_minutes)
+            profile = Profile(name=name, work_seconds=work_total_seconds, break_seconds=break_total_seconds)
             profile.validate()
         except ValueError as e:
             logger.warning("AppController.create_profile: %s", e)
@@ -363,23 +382,22 @@ class AppController:
         self._notifications.dnd = settings.dnd
         if self._window:
             self._window.update_dnd_button(settings.dnd)
+            # Также обновить кнопку в окне настроекесли оно открыто
+            sw = self._window.get_settings_window()
+            if sw and sw.winfo_exists():
+                sw.update_dnd_button(settings.dnd)
 
     # ===========================================================================
     # Вспомогательные методы
     # ===========================================================================
 
     def _refresh_profiles_ui(self) -> None:
-        """Обновить ProfileBar в окне."""
+        """Обновить селектор сцен в главном окне и в окне настроек."""
         if self._window is None:
             return
         profiles = [p.name for p in self._profiles.get_all()]
         active   = self._profiles.get_active().name
-        state    = self._timer.state
-        self._window.profile_bar.refresh(
-            profiles=profiles,
-            active=active,
-            mode=state.mode.value,
-        )
+        self._window.refresh_profile_selector(profiles, active)
 
     def _refresh_settings_ui(self) -> None:
         """Заполнить SettingsPanel значениями активного профиля и AppSettings."""
@@ -388,8 +406,11 @@ class AppController:
         profile  = self._profiles.get_active()
         settings = self._settings.get()
         self._window.settings_panel.load_profile(
+            name=profile.name,
             work_minutes=profile.work_minutes,
+            work_seconds=profile.work_extra_sec,
             break_minutes=profile.break_minutes,
+            break_seconds=profile.break_extra_sec,
         )
         self._window.settings_panel.load_settings(
             always_on_top=settings.always_on_top,
@@ -400,7 +421,6 @@ class AppController:
         if self._window is None:
             return
         profile = self._profiles.get_active()
-        # Показать начальное время активного профиля
         from core.timer import TimerState, TimerPhase, TimerMode
         idle_state = TimerState(
             mode=TimerMode.WORK,
@@ -429,6 +449,8 @@ class AppController:
         self._timer.stop()
         self._tray.stop()
         self._hotkeys.cleanup()
+        if self._obs:
+            self._obs.stop()
         self._bus.clear()
         if self._window:
             self._window.after(0, self._window.destroy)

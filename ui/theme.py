@@ -1,42 +1,51 @@
 """
-ui/theme.py — Константы дизайна: цвета и шрифты.
+ui/theme.py — Тема «Dark Fantasy / Neural» (v2).
 
-Все UI-компоненты импортируют COLORS и FONTS отсюда.
-Менять тему — только этот файл, ничего больше.
+Палитра вдохновлена тёмным фэнтези + эстетикой нейросетей:
+  глубокий фиолетово-чёрный фон, золотые и голубые акценты, пурпурное свечение.
 """
 
 from __future__ import annotations
 
 # ===========================================================================
-# Цвета (совместимы с существующим main.py)
+# Цвета
 # ===========================================================================
 
 COLORS: dict[str, str] = {
     # Фоны
-    "bg":           "#0d0d0d",   # фон окна
-    "panel":        "#161616",   # фон панелей (header, profile bar)
-    "border":       "#2a2a2a",   # разделители, рамки
+    "bg":           "#08061a",
+    "panel":        "#100e28",
+    "panel_light":  "#17143a",
+    "border":       "#2d2660",
+    "border_glow":  "#6d28d9",
 
     # Акценты режимов
-    "work":         "#e05c3a",   # оранжево-красный — режим работы
-    "rest":         "#3abfe0",   # голубой — режим отдыха
+    "work":         "#f59e0b",   # янтарно-золотой
+    "rest":         "#06b6d4",   # голубой циан
 
     # Текст
-    "text":         "#f0ece4",   # основной текст
-    "subtext":      "#6b6b6b",   # вторичный текст, подсказки
+    "text":         "#f0ebff",
+    "subtext":      "#6b5fa8",
+    "accent_text":  "#a78bfa",
 
     # Кнопки
-    "btn_work":     "#e05c3a",   # кнопка в режиме работы
-    "btn_rest":     "#3abfe0",   # кнопка в режиме отдыха
-    "btn_neutral":  "#2a2a2a",   # неактивная кнопка
-    "btn_hover":    "#3a3a3a",   # hover неактивной кнопки
-    "btn_work_hover": "#c04a2e", # hover кнопки работы
-    "btn_rest_hover": "#289ab8", # hover кнопки отдыха
+    "btn_work":         "#f59e0b",
+    "btn_rest":         "#06b6d4",
+    "btn_neutral":      "#1e1a45",
+    "btn_hover":        "#2d2660",
+    "btn_work_hover":   "#d97706",
+    "btn_rest_hover":   "#0891b2",
 
     # Специальные
-    "dnd_on":       "#9b59b6",   # DND-кнопка активна (фиолетовый)
-    "success":      "#3abfe0",   # текст успешного действия
-    "warning":      "#e0a03a",   # текст предупреждения
+    "dnd_on":       "#dc2626",
+    "success":      "#10b981",
+    "warning":      "#f59e0b",
+    "danger":       "#ef4444",
+
+    # Эффекты
+    "glow_work":    "#fbbf24",
+    "glow_rest":    "#22d3ee",
+    "glow_purple":  "#a855f7",
 }
 
 # ===========================================================================
@@ -44,18 +53,32 @@ COLORS: dict[str, str] = {
 # ===========================================================================
 
 FONTS: dict[str, tuple] = {
-    # Моноширинный шрифт — основа дизайна (как в оригинале)
-    "title":    ("Courier New", 13, "bold"),   # FOCUS TIMER в хедере
-    "mode":     ("Courier New", 14, "bold"),   # РАБОТА / ОТДЫХ
-    "clock":    ("Courier New", 72, "bold"),   # большие цифры таймера
-    "clock_big":("Courier New", 120,"bold"),   # BigModeWindow
-    "label":    ("Courier New", 11),           # обычные лейблы
-    "label_bold":("Courier New", 11, "bold"),
-    "btn":      ("Courier New", 14, "bold"),   # текст кнопки Старт
-    "btn_sm":   ("Courier New", 13),           # текст кнопки Стоп
-    "btn_xs":   ("Courier New", 11),           # маленькие кнопки (профили)
-    "entry":    ("Courier New", 13),           # поля ввода
-    "dialog":   ("Courier New", 15, "bold"),   # заголовок диалога
+    # Таймер
+    "clock":        ("Courier New", 64, "bold"),
+    "clock_big":    ("Courier New", 120, "bold"),
+
+    # Заголовки
+    "title":        ("Segoe UI", 11, "bold"),
+    "mode":         ("Segoe UI", 13, "bold"),
+    "section":      ("Segoe UI", 10),
+
+    # Кнопки
+    "btn_icon":     ("Segoe UI Emoji", 16),
+    "btn_sm":       ("Segoe UI", 10, "bold"),
+    "btn_text":     ("Segoe UI", 12, "bold"),
+
+    # Поля и диалоги
+    "entry":        ("Courier New", 13),
+    "label":        ("Segoe UI", 10),
+    "label_bold":   ("Segoe UI", 10, "bold"),
+    "dialog_title": ("Segoe UI", 14, "bold"),
+    "dialog_msg":   ("Segoe UI", 10),
+    "profile_btn":  ("Segoe UI", 10, "bold"),
+
+    # Алиасы для совместимости со старыми компонентами
+    "btn_xs":       ("Segoe UI", 10, "bold"),
+    "btn":          ("Segoe UI", 12, "bold"),
+    "dialog":       ("Segoe UI", 14, "bold"),
 }
 
 # ===========================================================================
@@ -63,9 +86,10 @@ FONTS: dict[str, tuple] = {
 # ===========================================================================
 
 def accent_for_mode(mode: str) -> str:
-    """Вернуть акцентный цвет для режима ('work' или 'break'/'rest')."""
     return COLORS["work"] if mode == "work" else COLORS["rest"]
 
 def hover_for_mode(mode: str) -> str:
-    """Вернуть hover-цвет для режима."""
     return COLORS["btn_work_hover"] if mode == "work" else COLORS["btn_rest_hover"]
+
+def glow_for_mode(mode: str) -> str:
+    return COLORS["glow_work"] if mode == "work" else COLORS["glow_rest"]

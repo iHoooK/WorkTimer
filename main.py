@@ -89,7 +89,17 @@ def main() -> None:
     settings = settings_repo.get()
     sound.enabled = settings.sound_enabled
 
-    # 5. AppController (Facade + DI)
+    # 5. OBS-сервер (запускаем до AppController, чтобы порт был занят)
+    from infrastructure.obs_server import OBSServer
+    obs = OBSServer(port=8765)
+    obs_ok = obs.start()
+    if obs_ok:
+        logger.info("main: OBS Browser Source → %s", obs.url)
+    else:
+        logger.warning("main: OBS-сервер не запущен (порт 8765 занят?)")
+        obs = None
+
+    # 6. AppController (Facade + DI)
     from ui.app import AppController
     controller = AppController(
         bus=bus,
@@ -100,20 +110,22 @@ def main() -> None:
         notifications=notifications,
         tray=tray,
         hotkeys=hotkeys,
+        obs=obs,
     )
 
-    # 6. Главное окно
+    # 7. Главное окно
     from ui.main_window import MainWindow
     window = MainWindow(controller=controller)
 
-    # 7. Замыкаем DI-граф (window → controller)
+    # 8. Замыкаем DI-граф (window → controller)
     controller.set_window(window)
     controller.on_startup()
 
-    # 8. Запуск event loop
+    # 9. Запуск event loop
     logger.info("main: запуск mainloop")
     window.mainloop()
     logger.info("main: завершение")
+
 
 
 if __name__ == "__main__":
