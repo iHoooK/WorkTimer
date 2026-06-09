@@ -29,6 +29,17 @@ _WIN_MIN_H = 400
 _WIN_MAX_H = 700
 
 
+def _accent_for_phase_role(role: str) -> str:
+    role = (role or "").strip().lower()
+    if role == "work":
+        return COLORS["work"]
+    if role == "rest":
+        return COLORS["rest"]
+    if role == "prep":
+        return COLORS["glow_purple"]
+    return COLORS["accent_text"]
+
+
 class SettingsWindow(ctk.CTkToplevel):
     """
     Окно настроек с адаптивной высотой и скроллируемым контентом.
@@ -141,6 +152,14 @@ class SettingsWindow(ctk.CTkToplevel):
         )
         self._lbl_preview_clock.pack(pady=(0, 4))
 
+        self._lbl_preview_phase = ctk.CTkLabel(
+            preview,
+            text="Работа",
+            font=FONTS["label"],
+            text_color=COLORS["subtext"],
+        )
+        self._lbl_preview_phase.pack(pady=(0, 6))
+
         self._preview_progress = ctk.CTkProgressBar(
             preview, height=4, corner_radius=2,
             fg_color=COLORS["border"], progress_color=COLORS["work"],
@@ -233,10 +252,7 @@ class SettingsWindow(ctk.CTkToplevel):
             settings = self._controller._settings.get()
             self.settings_panel.load_profile(
                 name=profile.name,
-                work_minutes=profile.work_minutes,
-                work_seconds=profile.work_extra_sec,
-                break_minutes=profile.break_minutes,
-                break_seconds=profile.break_extra_sec,
+                phases=profile.phases,
             )
             self.settings_panel.load_settings(always_on_top=settings.always_on_top)
             self.update_dnd_button(settings.dnd)
@@ -256,10 +272,7 @@ class SettingsWindow(ctk.CTkToplevel):
             profile = self._controller._profiles.get_active()
             self.settings_panel.load_profile(
                 name=profile.name,
-                work_minutes=profile.work_minutes,
-                work_seconds=profile.work_extra_sec,
-                break_minutes=profile.break_minutes,
-                break_seconds=profile.break_extra_sec,
+                phases=profile.phases,
             )
         except Exception as e:
             logger.warning("SettingsWindow._on_profile_selected: %s", e)
@@ -278,16 +291,16 @@ class SettingsWindow(ctk.CTkToplevel):
         self._profile_var.set(active)
 
     def sync_profile_bar(self, state: "TimerState") -> None:
-        from core.timer import TimerMode, TimerPhase
-        color    = accent_for_mode(state.mode.value)
-        mode_txt = "РАБОТА" if state.mode == TimerMode.WORK else "ОТДЫХ"
+        from core.timer import TimerPhase
 
-        self._lbl_preview_mode.configure(text=mode_txt, text_color=color)
+        color = _accent_for_phase_role(state.phase_role)
+
+        self._lbl_preview_mode.configure(text=state.phase_name.upper(), text_color=color)
         self._lbl_preview_clock.configure(text=state.format_time())
+        self._lbl_preview_phase.configure(text=state.phase_name, text_color=COLORS["subtext"])
         self._preview_progress.configure(progress_color=color)
         self._preview_progress.set(state.progress)
 
-        from core.timer import TimerPhase
         if state.phase == TimerPhase.RUNNING:
             self._btn_start.configure(text="⏸  ПАУЗА", fg_color=color)
         elif state.phase == TimerPhase.PAUSED:

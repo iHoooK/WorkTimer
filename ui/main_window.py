@@ -28,6 +28,17 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _accent_for_phase_role(role: str) -> str:
+    role = (role or "").strip().lower()
+    if role == "work":
+        return COLORS["work"]
+    if role == "rest":
+        return COLORS["rest"]
+    if role == "prep":
+        return COLORS["glow_purple"]
+    return COLORS["accent_text"]
+
+
 class MainWindow(ctk.CTk):
     """
     Компактное окно таймера.
@@ -49,6 +60,7 @@ class MainWindow(ctk.CTk):
         self._build_header()
         self._build_timer_area()
         self._build_profile_selector()
+        self._build_phase_selector()
         self._build_action_bar()
 
         self.protocol("WM_DELETE_WINDOW", self._controller.on_window_close)
@@ -68,7 +80,7 @@ class MainWindow(ctk.CTk):
     def _center_on_screen(self) -> None:
         """Разместить окно по центру экрана."""
         self.update_idletasks()
-        w, h = 300, 265   # +35px под строку профиля
+        w, h = 300, 300   # + строка профиля и фаз
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
         x = (sw - w) // 2
@@ -172,6 +184,50 @@ class MainWindow(ctk.CTk):
         )
         self._profile_menu.pack(side="left", padx=4)
 
+    def _build_phase_selector(self) -> None:
+        """Компактная строка выбора и запуска конкретной фазы."""
+        row = ctk.CTkFrame(self, fg_color=COLORS["panel"], corner_radius=0, height=32)
+        row.pack(fill="x")
+        row.pack_propagate(False)
+
+        ctk.CTkLabel(
+            row,
+            text="Фаза:",
+            font=FONTS["label"],
+            text_color=COLORS["subtext"],
+        ).pack(side="left", padx=(10, 4))
+
+        self._phase_names: list[str] = []
+        self._phase_var = ctk.StringVar(value="")
+        self._phase_menu = ctk.CTkOptionMenu(
+            row,
+            variable=self._phase_var,
+            values=[""],
+            width=148,
+            height=22,
+            font=FONTS["btn_sm"],
+            fg_color=COLORS["btn_neutral"],
+            button_color=COLORS["border_glow"],
+            button_hover_color=COLORS["border_glow"],
+            dropdown_fg_color=COLORS["panel"],
+            dropdown_hover_color=COLORS["border"],
+            dropdown_text_color=COLORS["text"],
+            corner_radius=4,
+        )
+        self._phase_menu.pack(side="left", padx=4)
+
+        ctk.CTkButton(
+            row,
+            text="▶",
+            width=32,
+            height=22,
+            font=FONTS["btn_xs"],
+            fg_color=COLORS["btn_neutral"],
+            hover_color=COLORS["border_glow"],
+            corner_radius=4,
+            command=self._start_selected_phase,
+        ).pack(side="left", padx=(4, 0))
+
     def _build_action_bar(self) -> None:
         """Нижняя строка с иконками-кнопками."""
         bar = ctk.CTkFrame(self, fg_color=COLORS["panel"], corner_radius=0, height=44)
@@ -196,12 +252,12 @@ class MainWindow(ctk.CTk):
         )
         self._btn_start.pack(side="left", padx=4)
 
-        # ☕ Отдых — включить перерыв в любой момент
+        # Следующая фаза — пропустить текущую и перейти дальше
         ctk.CTkButton(
-            inner, text="☕",
-            fg_color=COLORS["rest"],
-            hover_color=COLORS["btn_rest_hover"],
-            command=self._controller.switch_to_break,
+            inner, text="⏭",
+            fg_color=COLORS["btn_neutral"],
+            hover_color=COLORS["border_glow"],
+            command=self._controller.start_next_phase,
             **btn_cfg,
         ).pack(side="left", padx=4)
 
@@ -229,11 +285,10 @@ class MainWindow(ctk.CTk):
 
     def update_timer(self, state: "TimerState") -> None:
         """Обновить всё по TimerState (вызывается из AppController через after(0,...))."""
-        from core.timer import TimerMode, TimerPhase
+        from core.timer import TimerPhase
 
-        mode_str = state.mode.value
-        color    = accent_for_mode(mode_str)
-        mode_txt = "РАБОТА" if state.mode == TimerMode.WORK else "ОТДЫХ"
+        color = _accent_for_phase_role(state.phase_role)
+        mode_txt = state.phase_name.upper()
 
         self._lbl_mode.configure(text=mode_txt, text_color=color)
         self._lbl_clock.configure(text=state.format_time(), text_color=COLORS["text"])
@@ -241,16 +296,19 @@ class MainWindow(ctk.CTk):
         self._progress.configure(progress_color=color)
         self._progress.set(state.progress)
 
+        if hasattr(self, "_phase_var") and state.phase_name in self._phase_names:
+            self._phase_var.set(state.phase_name)
+
         # Кнопка Старт меняет иконку и цвет
         if state.phase == TimerPhase.RUNNING:
             self._btn_start.configure(text="⏸", fg_color=color,
-                                      hover_color=COLORS["btn_work_hover"] if state.mode == TimerMode.WORK else COLORS["btn_rest_hover"])
+                                      hover_color=COLORS["btn_rest_hover"] if state.phase_role == "rest" else COLORS["btn_work_hover"])
         elif state.phase == TimerPhase.PAUSED:
             self._btn_start.configure(text="▶", fg_color=COLORS["glow_purple"],
                                       hover_color="#7c3aed")
         else:
-            self._btn_start.configure(text="▶", fg_color=COLORS["work"],
-                                      hover_color=COLORS["btn_work_hover"])
+            self._btn_start.configure(text="▶", fg_color=color,
+                                      hover_color=COLORS["btn_rest_hover"] if state.phase_role == "rest" else COLORS["btn_work_hover"])
 
         # Обновить SettingsWindow если открыт
         if self._settings_win and self._settings_win.winfo_exists():
@@ -291,6 +349,11 @@ class MainWindow(ctk.CTk):
         """Пользователь выбрал сцену в главном окне."""
         self._controller.select_profile(name)
 
+    def _start_selected_phase(self) -> None:
+        name = self._phase_var.get()
+        if name in self._phase_names:
+            self._controller.start_phase(self._phase_names.index(name))
+
     # ===========================================================================
     # Public API — обновление селектора сцен
     # ===========================================================================
@@ -303,6 +366,17 @@ class MainWindow(ctk.CTk):
         # Синхронизировать с окном настроек если открыто
         if self._settings_win and self._settings_win.winfo_exists():
             self._settings_win.refresh_profiles(profiles, active)
+
+    def refresh_phase_selector(self, phases: list[str], active_index: int = 0) -> None:
+        """Обновить список фаз активного сценария."""
+        self._phase_names = list(phases)
+        values = self._phase_names or [""]
+        self._phase_menu.configure(values=values)
+        if self._phase_names:
+            index = max(0, min(active_index, len(self._phase_names) - 1))
+            self._phase_var.set(self._phase_names[index])
+        else:
+            self._phase_var.set("")
 
     # ===========================================================================
     # Заглушки для обратной совместимости с AppController

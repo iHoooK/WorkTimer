@@ -132,7 +132,7 @@ const modeEl = document.getElementById('mode');
 const timeEl = document.getElementById('time');
 const barEl  = document.getElementById('bar');
 
-const COLORS = { work: '#f59e0b', rest: '#06b6d4' };
+const COLORS = { work: '#f59e0b', rest: '#06b6d4', prep: '#a855f7', custom: '#a78bfa' };
 
 async function poll() {
   try {
@@ -140,11 +140,11 @@ async function poll() {
     if (!res.ok) return;
     const data = await res.json();
 
-    const isRest = data.mode !== 'work';
-    const accent = isRest ? COLORS.rest : COLORS.work;
+    const role = data.phase_role || data.mode || 'custom';
+    const accent = COLORS[role] || COLORS.custom;
 
     document.documentElement.style.setProperty('--accent', accent);
-    modeEl.textContent = isRest ? 'ОТДЫХ' : 'РАБОТА';
+    modeEl.textContent = data.phase_name || (role === 'rest' ? 'ОТДЫХ' : 'РАБОТА');
     timeEl.textContent = data.time   || '--:--';
     barEl.style.width  = ((data.progress || 0) * 100).toFixed(1) + '%';
   } catch (_) { /* сервер ещё не готов */ }
@@ -169,13 +169,17 @@ class _SharedState:
         self._lock     = threading.Lock()
         self._time     = "00:00"
         self._mode     = "work"
+        self._phase_name = "Работа"
+        self._phase_role = "work"
         self._progress = 0.0
         self._phase    = "idle"
 
-    def update(self, time_str: str, mode: str, progress: float, phase: str) -> None:
+    def update(self, time_str: str, mode: str, progress: float, phase: str, phase_name: str, phase_role: str) -> None:
         with self._lock:
             self._time     = time_str
             self._mode     = mode
+            self._phase_name = phase_name
+            self._phase_role = phase_role
             self._progress = progress
             self._phase    = phase
 
@@ -184,6 +188,8 @@ class _SharedState:
             d = {
                 "time":     self._time,
                 "mode":     self._mode,
+                "phase_name": self._phase_name,
+                "phase_role": self._phase_role,
                 "progress": round(self._progress, 4),
                 "phase":    self._phase,
             }
@@ -281,6 +287,8 @@ class OBSServer:
             mode=timer_state.mode.value,
             progress=timer_state.progress,
             phase=timer_state.phase.value,
+            phase_name=timer_state.phase_name,
+            phase_role=timer_state.phase_role,
         )
 
     def stop(self) -> None:

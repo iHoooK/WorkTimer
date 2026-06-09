@@ -1,4 +1,10 @@
 {
+  "settings": {
+    "dnd": false,
+    "always_on_top": false,
+    "sound_enabled": true,
+    "auto_switch": false
+  },
   "profiles": {
     "Работа": {
       "phases": [
@@ -22,11 +28,11 @@
         }
       ]
     },
-    "Спорт": {
+    "Учёба": {
       "phases": [
         {
-          "name": "Работа",
-          "duration_seconds": 2700,
+          "name": "Учёба",
+          "duration_seconds": 3000,
           "color_role": "work",
           "sound_enabled": true,
           "notification_enabled": true,
@@ -34,8 +40,8 @@
           "note": ""
         },
         {
-          "name": "Отдых",
-          "duration_seconds": 900,
+          "name": "Перерыв",
+          "duration_seconds": 600,
           "color_role": "rest",
           "sound_enabled": true,
           "notification_enabled": true,
@@ -44,11 +50,11 @@
         }
       ]
     },
-    "Пишем игру": {
+    "Спорт": {
       "phases": [
         {
-          "name": "Работа",
-          "duration_seconds": 610,
+          "name": "Тренировка",
+          "duration_seconds": 2700,
           "color_role": "work",
           "sound_enabled": true,
           "notification_enabled": true,
@@ -56,8 +62,8 @@
           "note": ""
         },
         {
-          "name": "Отдых",
-          "duration_seconds": 370,
+          "name": "Восстановление",
+          "duration_seconds": 900,
           "color_role": "rest",
           "sound_enabled": true,
           "notification_enabled": true,
@@ -67,5 +73,5 @@
       ]
     }
   },
-  "active_profile": "Пишем игру"
+  "active_profile": "Работа"
 }

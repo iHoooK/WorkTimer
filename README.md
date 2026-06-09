@@ -22,26 +22,42 @@
 **Важно:** при установке поставьте галочку **"Add Python to PATH"**
 
 ### Шаг 2 — Запустить сборку
-Дважды кликните на файл **`build.bat`**  
+
+**Через bash (Git Bash, WSL и т.п.):**
+```bash
+powershell -ExecutionPolicy Bypass -File build.ps1
+```
+
+**Через PowerShell напрямую:**
+```powershell
+.\build.ps1
+```
+
+**Двойным кликом:** правой кнопкой на `build.ps1` → *"Выполнить с помощью PowerShell"*
+
 Скрипт сам установит все зависимости и соберёт EXE.
 
 ### Шаг 3 — Готово
-Файл `dist\FocusTimer.exe` — это ваше приложение.  
+Файл `dist\WorkTimer.exe` — это ваше приложение.  
 Можно скопировать его куда угодно и запускать без Python.
 
 ## Структура проекта
 
 ```
-focus_timer/
-  main.py          — исходный код приложения
+WorkTimer/
+  main.py          — точка входа приложения
   requirements.txt — список зависимостей
-  build.bat        — скрипт сборки EXE
+  build.ps1        — скрипт сборки EXE
   README.md        — эта инструкция
+  core/            — бизнес-логика
+  infrastructure/  — файлы, звук, трей, хоткеи
+  ui/              — интерфейс
+  data/            — настройки (settings.json)
 ```
 
 ## Ручной запуск (без сборки EXE)
 
-```bat
+```bash
 pip install -r requirements.txt
 python main.py
 ```
@@ -61,4 +77,4 @@ python main.py
 2. Введите нужное время в полях "Работа" и "Отдых"
 3. Нажмите "Сохранить профиль"
 
-Настройки сохраняются в файл `~/.focus_timer_config.json`
+Настройки сохраняются в файл `data/settings.json` рядом с приложением. При первом запуске приложение может перенести данные из старого файла `~/.focus_timer_config.json`, если новый файл ещё не создан.

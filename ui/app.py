@@ -19,7 +19,7 @@ from core.events   import EventBus, Event
 from core.timer    import TimerEngine, TimerMode, TimerPhase, TimerState
 from core.timer    import EVENT_TICK, EVENT_FINISHED, EVENT_STARTED
 from core.timer    import EVENT_PAUSED, EVENT_RESUMED, EVENT_STOPPED
-from core.profiles import Profile, ProfileRepository
+from core.profiles import Phase, Profile, ProfileRepository
 from core.settings import AppSettings, SettingsRepository
 from ui.theme      import COLORS
 
@@ -71,6 +71,7 @@ class AppController:
         self._tray          = tray
         self._hotkeys       = hotkeys
         self._obs           = obs        # OBSServer | None
+        self._active_phase_index = 0
 
         # Ссылка на окно — устанавливается после создания MainWindow
         self._window: Optional["MainWindow"] = None
@@ -147,9 +148,8 @@ class AppController:
             self._obs.update(state)
 
         # Обновить подсказку трея
-        mode_text = "Работа" if state.mode == TimerMode.WORK else "Отдых"
         self._tray.update_tooltip(
-            f"Focus Timer — {mode_text} {state.format_time()}"
+            f"WorkTimer — {state.phase_name} {state.format_time()}"
         )
 
     def _on_finished(self, event: Event) -> None:
@@ -164,47 +164,61 @@ class AppController:
         from ui.dialogs.confirm_dialog import ConfirmDialog
         from ui.theme import COLORS
 
-        if state.mode == TimerMode.WORK:
-            self._sound.play_work_end()
-            self._notifications.notify(
-                "⏰ Время работы истекло!",
-                "Пора отдохнуть. Подтвердите начало отдыха.",
-            )
-            # Автопереключение если включено
-            if self._settings.get().auto_switch:
-                self.switch_to_break()
-                return
+        profile = self._profiles.get_active()
+        phases = profile.phases
+        phase_index = self._active_phase_index
+        phase = phases[phase_index] if 0 <= phase_index < len(phases) else profile.first_phase
+        if phase is None:
+            return
 
-            if self._confirm_win and self._confirm_win.winfo_exists():
-                self._confirm_win.destroy()
+        if self._sound.enabled and phase.sound_enabled:
+            if phase.color_role == "rest":
+                self._sound.play_break_end()
+            else:
+                self._sound.play_work_end()
+
+        if phase.notification_enabled:
+            if phase.color_role == "rest":
+                self._notifications.notify(
+                    f"✅ Фаза «{phase.name}» завершена",
+                    "Можно перейти к следующей фазе.",
+                )
+            else:
+                self._notifications.notify(
+                    f"⏰ Фаза «{phase.name}» завершена",
+                    "Пора перейти к следующему этапу сценария.",
+                )
+
+        auto_allowed = phase.auto_start_next
+        next_index = phase_index + 1
+        has_next = next_index < len(phases)
+
+        if auto_allowed and has_next:
+            self._start_phase(next_index)
+            return
+
+        if self._confirm_win and self._confirm_win.winfo_exists():
+            self._confirm_win.destroy()
+
+        if has_next:
+            next_phase = phases[next_index]
             self._confirm_win = ConfirmDialog.show(
                 parent=self._window,
-                title="Время работы вышло!",
-                message="Начать таймер отдыха?",
-                yes_label="Начать отдых",
-                color=COLORS["rest"],
-                on_yes=self.switch_to_break,
+                title=f"Фаза «{phase.name}» завершена",
+                message=f"Начать следующую фазу «{next_phase.name}»?",
+                yes_label="Следующая фаза",
+                color=COLORS["rest" if next_phase.color_role == "rest" else "work"],
+                on_yes=lambda idx=next_index: self._start_phase(idx),
                 on_no=self._on_confirm_cancelled,
             )
         else:
-            self._sound.play_break_end()
-            self._notifications.notify(
-                "✅ Отдых завершён!",
-                "Время вернуться к работе.",
-            )
-            if self._settings.get().auto_switch:
-                self.switch_to_work()
-                return
-
-            if self._confirm_win and self._confirm_win.winfo_exists():
-                self._confirm_win.destroy()
             self._confirm_win = ConfirmDialog.show(
                 parent=self._window,
-                title="Отдых завершён!",
-                message="Начать новый рабочий цикл?",
-                yes_label="Начать работу",
+                title=f"Сценарий «{profile.name}» завершён",
+                message="Запустить сценарий сначала?",
+                yes_label="Сначала",
                 color=COLORS["work"],
-                on_yes=self.switch_to_work,
+                on_yes=self._restart_cycle,
                 on_no=self._on_confirm_cancelled,
             )
 
@@ -225,6 +239,56 @@ class AppController:
     # Шаг 14.3 — Управление таймером
     # ===========================================================================
 
+    def _legacy_profile_to_phases(self, work_total_seconds: int, break_total_seconds: int) -> list[Phase]:
+        return [
+            Phase(name="Работа", duration_seconds=work_total_seconds, color_role="work"),
+            Phase(name="Отдых", duration_seconds=break_total_seconds, color_role="rest"),
+        ]
+
+    def _active_profile_phases(self) -> list[Phase]:
+        return self._profiles.get_active().phases
+
+    def _phase_mode(self, phase: Phase) -> TimerMode:
+        role = (phase.color_role or "").strip().lower()
+        if role == "work":
+            return TimerMode.WORK
+        if role == "rest":
+            return TimerMode.BREAK
+        return TimerMode.CUSTOM
+
+    def _start_phase(self, index: int) -> None:
+        profile = self._profiles.get_active()
+        phases = profile.phases
+        if not phases:
+            return
+        index = max(0, min(index, len(phases) - 1))
+        phase = phases[index]
+        self._active_phase_index = index
+        self._timer.start(
+            duration_seconds=phase.duration_seconds,
+            mode=self._phase_mode(phase),
+            phase_name=phase.name,
+            phase_role=phase.color_role,
+        )
+
+    def _start_first_phase(self) -> None:
+        self._start_phase(0)
+
+    def _start_next_phase(self) -> bool:
+        phases = self._active_profile_phases()
+        next_index = self._active_phase_index + 1
+        if next_index < len(phases):
+            self._start_phase(next_index)
+            return True
+        return False
+
+    def _restart_cycle(self) -> bool:
+        phases = self._active_profile_phases()
+        if not phases:
+            return False
+        self._start_phase(0)
+        return True
+
     def toggle_timer(self) -> None:
         """Старт / Пауза / Возобновить — в зависимости от текущей фазы."""
         state = self._timer.state
@@ -233,35 +297,43 @@ class AppController:
         elif state.phase == TimerPhase.PAUSED:
             self._timer.resume()
         else:
-            # IDLE или FINISHED — запустить заново
-            profile = self._profiles.get_active()
-            mode    = TimerMode.WORK  # всегда начинаем с работы при ручном старте
-            self._timer.start(
-                duration_seconds=profile.work_seconds,
-                mode=mode,
-            )
+            self._start_first_phase()
 
     def stop_timer(self) -> None:
         """Остановить таймер и сбросить UI."""
         self._timer.stop()
+        self._active_phase_index = 0
         if self._window:
             self._window.after(0, self._reset_ui)
 
     def switch_to_break(self) -> None:
-        """Переключить на режим отдыха и запустить таймер."""
-        profile = self._profiles.get_active()
-        self._timer.start(
-            duration_seconds=profile.break_seconds,
-            mode=TimerMode.BREAK,
-        )
+        """Переключить на следующую фазу отдыха, если она есть."""
+        phases = self._active_profile_phases()
+        if len(phases) > 1:
+            self._start_phase(1)
+        else:
+            self._start_first_phase()
 
     def switch_to_work(self) -> None:
-        """Переключить на режим работы и запустить таймер."""
-        profile = self._profiles.get_active()
-        self._timer.start(
-            duration_seconds=profile.work_seconds,
-            mode=TimerMode.WORK,
-        )
+        """Переключить на первую фазу сценария и запустить таймер."""
+        self._start_first_phase()
+
+    def start_phase(self, index: int) -> None:
+        """Запустить конкретную фазу активного сценария."""
+        self._start_phase(index)
+
+    def start_next_phase(self) -> None:
+        """Запустить следующую фазу активного сценария."""
+        if not self._start_next_phase():
+            self._restart_cycle()
+
+    def get_active_phase_names(self) -> list[str]:
+        """Вернуть имена фаз активного сценария."""
+        return [phase.name for phase in self._profiles.get_active().phases]
+
+    def get_active_phase_index(self) -> int:
+        """Вернуть индекс текущей фазы."""
+        return self._active_phase_index
 
     # ===========================================================================
     # Шаг 14.3 — Управление профилями и настройками
@@ -272,22 +344,36 @@ class AppController:
         self.stop_timer()
         try:
             self._profiles.set_active(name)
+            self._active_phase_index = 0
         except KeyError:
             logger.warning("AppController: профиль %r не найден", name)
             return
         self._refresh_profiles_ui()
         self._refresh_settings_ui()
 
-    def save_profile_settings(self, name: str, work_total_seconds: int, break_total_seconds: int) -> None:
-        """Сохранить / переименовать активный профиль."""
-        active   = self._profiles.get_active()
+    def save_profile_settings(self, name: str, *payload) -> None:
+        """Сохранить / переименовать активный сценарий."""
+        active = self._profiles.get_active()
         old_name = active.name
+
+        phases_input = payload[0] if payload else []
+        phases: list[Phase]
+        if len(payload) == 1 and isinstance(phases_input, (list, tuple)):
+            phases = []
+            for item in phases_input:
+                if isinstance(item, Phase):
+                    phases.append(item)
+                elif isinstance(item, dict):
+                    phases.append(Phase.from_dict(item))
+                else:
+                    raise TypeError(f"Неверный тип фазы: {type(item)!r}")
+        elif len(payload) == 2 and all(isinstance(x, int) for x in payload):
+            phases = self._legacy_profile_to_phases(payload[0], payload[1])
+        else:
+            raise TypeError("save_profile_settings expects phases list or legacy work/rest seconds")
+
         try:
-            new_profile = Profile(
-                name=name,
-                work_seconds=work_total_seconds,
-                break_seconds=break_total_seconds,
-            )
+            new_profile = Profile(name=name, phases=phases)
             new_profile.validate()
         except ValueError as e:
             if self._window:
@@ -299,7 +385,6 @@ class AppController:
         self.stop_timer()
 
         if name != old_name:
-            # Переименование: сохраняем под новым именем, удаляем старое
             self._profiles.save(new_profile)
             try:
                 self._profiles.delete(old_name)
@@ -317,9 +402,12 @@ class AppController:
             )
 
     def create_profile(self, name: str, work_total_seconds: int, break_total_seconds: int) -> None:
-        """Создать новый профиль и сделать его активным."""
+        """Создать новый сценарий в legacy-формате и сделать его активным."""
         try:
-            profile = Profile(name=name, work_seconds=work_total_seconds, break_seconds=break_total_seconds)
+            profile = Profile(
+                name=name,
+                phases=self._legacy_profile_to_phases(work_total_seconds, break_total_seconds),
+            )
             profile.validate()
         except ValueError as e:
             logger.warning("AppController.create_profile: %s", e)
@@ -398,22 +486,27 @@ class AppController:
         profiles = [p.name for p in self._profiles.get_all()]
         active   = self._profiles.get_active().name
         self._window.refresh_profile_selector(profiles, active)
+        self._window.refresh_phase_selector(
+            self.get_active_phase_names(),
+            self.get_active_phase_index(),
+        )
 
     def _refresh_settings_ui(self) -> None:
-        """Заполнить SettingsPanel значениями активного профиля и AppSettings."""
+        """Заполнить SettingsPanel значениями активного сценария и AppSettings."""
         if self._window is None:
             return
         profile  = self._profiles.get_active()
         settings = self._settings.get()
         self._window.settings_panel.load_profile(
             name=profile.name,
-            work_minutes=profile.work_minutes,
-            work_seconds=profile.work_extra_sec,
-            break_minutes=profile.break_minutes,
-            break_seconds=profile.break_extra_sec,
+            phases=profile.phases,
         )
         self._window.settings_panel.load_settings(
             always_on_top=settings.always_on_top,
+        )
+        self._window.refresh_phase_selector(
+            [phase.name for phase in profile.phases],
+            self._active_phase_index,
         )
 
     def _reset_ui(self) -> None:
@@ -421,12 +514,15 @@ class AppController:
         if self._window is None:
             return
         profile = self._profiles.get_active()
+        first_phase = profile.first_phase
         from core.timer import TimerState, TimerPhase, TimerMode
         idle_state = TimerState(
-            mode=TimerMode.WORK,
+            mode=TimerMode.WORK if first_phase is None else self._phase_mode(first_phase),
             phase=TimerPhase.IDLE,
-            remaining_seconds=profile.work_seconds,
-            total_seconds=profile.work_seconds,
+            phase_name=first_phase.name if first_phase else "Работа",
+            phase_role=first_phase.color_role if first_phase else "work",
+            remaining_seconds=first_phase.duration_seconds if first_phase else 0,
+            total_seconds=first_phase.duration_seconds if first_phase else 0,
             elapsed_seconds=0,
         )
         self._window.update_timer(idle_state)

@@ -32,6 +32,7 @@ class TimerMode(str, Enum):
     """Режим таймера: работа или перерыв."""
     WORK  = "work"
     BREAK = "break"
+    CUSTOM = "custom"
 
 
 class TimerPhase(str, Enum):
@@ -59,6 +60,8 @@ class TimerState:
     """
     mode: TimerMode
     phase: TimerPhase
+    phase_name: str
+    phase_role: str
     remaining_seconds: int
     total_seconds: int
     elapsed_seconds: int
@@ -98,7 +101,7 @@ class TimerState:
     def __repr__(self) -> str:
         return (
             f"TimerState({self.phase.value}, {self.format_time()}, "
-            f"mode={self.mode.value}, progress={self.progress:.0%})"
+            f"mode={self.mode.value}, phase={self.phase_name!r}, progress={self.progress:.0%})"
         )
 
 
@@ -152,6 +155,8 @@ class TimerEngine:
 
         # Состояние
         self._mode              = TimerMode.WORK
+        self._phase_name        = "Работа"
+        self._phase_role        = "work"
         self._total_seconds     = 0
         self._remaining_seconds = 0
         self._elapsed_seconds   = 0
@@ -164,7 +169,14 @@ class TimerEngine:
     # Public API
     # ------------------------------------------------------------------
 
-    def start(self, duration_seconds: int, mode: TimerMode = TimerMode.WORK) -> None:
+    def start(
+        self,
+        duration_seconds: int,
+        mode: TimerMode = TimerMode.WORK,
+        *,
+        phase_name: str = "",
+        phase_role: str | None = None,
+    ) -> None:
         """
         Запустить таймер заново.
 
@@ -172,7 +184,9 @@ class TimerEngine:
 
         Args:
             duration_seconds: длительность в секундах, должна быть > 0.
-            mode: TimerMode.WORK или TimerMode.BREAK.
+            mode: TimerMode.WORK, TimerMode.BREAK или TimerMode.CUSTOM.
+            phase_name: человекочитаемое имя текущей фазы.
+            phase_role: цветовая роль фазы для UI.
 
         Raises:
             ValueError: если duration_seconds <= 0.
@@ -186,6 +200,8 @@ class TimerEngine:
 
         with self._lock:
             self._mode              = mode
+            self._phase_name        = phase_name.strip() or self._default_phase_name(mode)
+            self._phase_role        = (phase_role or mode.value).strip() or mode.value
             self._total_seconds     = duration_seconds
             self._remaining_seconds = duration_seconds
             self._elapsed_seconds   = 0
@@ -264,6 +280,8 @@ class TimerEngine:
             return TimerState(
                 mode=self._mode,
                 phase=self._phase,
+                phase_name=self._phase_name,
+                phase_role=self._phase_role,
                 remaining_seconds=self._remaining_seconds,
                 total_seconds=self._total_seconds,
                 elapsed_seconds=self._elapsed_seconds,
@@ -314,6 +332,14 @@ class TimerEngine:
         # Локальный импорт — разрываем возможный циклический импорт
         from core.events import Event
         self._bus.publish(Event(name=event_name, data=self.state))
+
+    @staticmethod
+    def _default_phase_name(mode: TimerMode) -> str:
+        if mode == TimerMode.BREAK:
+            return "Отдых"
+        if mode == TimerMode.CUSTOM:
+            return "Фаза"
+        return "Работа"
 
     def __repr__(self) -> str:
         s = self.state
