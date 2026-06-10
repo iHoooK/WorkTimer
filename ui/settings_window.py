@@ -12,9 +12,10 @@ v4:
 from __future__ import annotations
 
 import customtkinter as ctk
+from tkinter import filedialog
 from typing import TYPE_CHECKING
 
-from ui.theme import COLORS, FONTS, accent_for_mode
+from ui.theme import COLORS, FONTS, THEME_DARK, THEME_LIGHT, THEME_SYSTEM, accent_for_mode
 from ui.components.settings_panel import SettingsPanel
 
 if TYPE_CHECKING:
@@ -27,6 +28,14 @@ logger = logging.getLogger(__name__)
 _WIN_W   = 430
 _WIN_MIN_H = 400
 _WIN_MAX_H = 700
+
+THEME_OPTIONS = [
+    (THEME_SYSTEM, "Системная"),
+    (THEME_LIGHT, "Светлая"),
+    (THEME_DARK, "Тёмная"),
+]
+THEME_LABEL_TO_VALUE = {label: value for value, label in THEME_OPTIONS}
+THEME_VALUE_TO_LABEL = {value: label for value, label in THEME_OPTIONS}
 
 
 def _accent_for_phase_role(role: str) -> str:
@@ -49,7 +58,7 @@ class SettingsWindow(ctk.CTkToplevel):
         super().__init__(parent)
         self._controller = controller
 
-        self.title("Focus Timer — Настройки")
+        self.title("WorkTimer — Настройки")
         self.resizable(False, True)          # можно тянуть по высоте
         self.configure(fg_color=COLORS["bg"])
         self.minsize(_WIN_W, _WIN_MIN_H)
@@ -70,6 +79,8 @@ class SettingsWindow(ctk.CTkToplevel):
 
         self._build_profile_selector()
         self._build_timer_display()
+        self._build_app_preferences()
+        self._build_obs_preferences()
         self._build_separator()
         self._build_settings_section()
         self._build_profile_management()
@@ -186,6 +197,83 @@ class SettingsWindow(ctk.CTkToplevel):
             command=self._controller.stop_timer, **btn_cfg,
         ).pack(side="left", padx=6)
 
+    def _build_app_preferences(self) -> None:
+        self._app_prefs = ctk.CTkFrame(self._scroll, fg_color=COLORS["panel_light"], corner_radius=8)
+        self._app_prefs.pack(fill="x", padx=12, pady=4)
+
+        ctk.CTkLabel(
+            self._app_prefs,
+            text="Тема:",
+            font=FONTS["label_bold"],
+            text_color=COLORS["subtext"],
+        ).pack(side="left", padx=(14, 6), pady=8)
+
+        self._theme_var = ctk.StringVar(value=THEME_VALUE_TO_LABEL[THEME_SYSTEM])
+        self._theme_menu = ctk.CTkOptionMenu(
+            self._app_prefs,
+            variable=self._theme_var,
+            values=[label for _, label in THEME_OPTIONS],
+            width=145,
+            height=28,
+            font=FONTS["btn_sm"],
+            fg_color=COLORS["btn_neutral"],
+            button_color=COLORS["border_glow"],
+            button_hover_color=COLORS["border_glow"],
+            dropdown_fg_color=COLORS["panel"],
+            dropdown_hover_color=COLORS["border"],
+            dropdown_text_color=COLORS["text"],
+            corner_radius=6,
+            command=self._on_theme_selected,
+        )
+        self._theme_menu.pack(side="left", padx=6, pady=8)
+
+        ctk.CTkButton(
+            self._app_prefs,
+            text="CSV",
+            width=58,
+            height=28,
+            font=FONTS["btn_sm"],
+            fg_color=COLORS["btn_neutral"],
+            hover_color=COLORS["btn_hover"],
+            corner_radius=6,
+            command=self._export_journal_csv,
+        ).pack(side="right", padx=10, pady=8)
+
+    def _build_obs_preferences(self) -> None:
+        self._obs_prefs = ctk.CTkFrame(self._scroll, fg_color=COLORS["panel_light"], corner_radius=8)
+        self._obs_prefs.pack(fill="x", padx=12, pady=4)
+
+        ctk.CTkLabel(
+            self._obs_prefs,
+            text="OBS:",
+            font=FONTS["label_bold"],
+            text_color=COLORS["subtext"],
+        ).pack(side="left", padx=(14, 6), pady=8)
+
+        self._entry_obs_url = ctk.CTkEntry(
+            self._obs_prefs,
+            width=235,
+            height=28,
+            font=FONTS["entry"],
+            fg_color=COLORS["bg"],
+            border_color=COLORS["border"],
+            text_color=COLORS["text"],
+        )
+        self._entry_obs_url.pack(side="left", padx=6, pady=8)
+        self._entry_obs_url.insert(0, self._controller.get_obs_url())
+
+        ctk.CTkButton(
+            self._obs_prefs,
+            text="Copy",
+            width=58,
+            height=28,
+            font=FONTS["btn_sm"],
+            fg_color=COLORS["btn_neutral"],
+            hover_color=COLORS["btn_hover"],
+            corner_radius=6,
+            command=self._copy_obs_url,
+        ).pack(side="right", padx=10, pady=8)
+
     def _build_separator(self) -> None:
         ctk.CTkFrame(self._scroll, fg_color=COLORS["border"], height=1).pack(
             fill="x", padx=16, pady=10)
@@ -255,6 +343,7 @@ class SettingsWindow(ctk.CTkToplevel):
                 phases=profile.phases,
             )
             self.settings_panel.load_settings(always_on_top=settings.always_on_top)
+            self.update_theme_selector(settings.theme_mode)
             self.update_dnd_button(settings.dnd)
         except Exception as e:
             logger.warning("SettingsWindow._populate settings: %s", e)
@@ -276,6 +365,31 @@ class SettingsWindow(ctk.CTkToplevel):
             )
         except Exception as e:
             logger.warning("SettingsWindow._on_profile_selected: %s", e)
+
+    def _on_theme_selected(self, label: str) -> None:
+        self._controller.set_theme_mode(THEME_LABEL_TO_VALUE.get(label, THEME_SYSTEM))
+
+    def _copy_obs_url(self) -> None:
+        self.clipboard_clear()
+        self.clipboard_append(self._controller.get_obs_url())
+        self.settings_panel.set_status("OBS URL скопирован", COLORS["success"])
+
+    def _export_journal_csv(self) -> None:
+        path = filedialog.asksaveasfilename(
+            parent=self,
+            title="Экспорт журнала WorkTimer",
+            defaultextension=".csv",
+            filetypes=[("CSV", "*.csv"), ("All files", "*.*")],
+            initialfile="worktimer-journal.csv",
+        )
+        if not path:
+            return
+        try:
+            count = self._controller.export_journal_csv(path)
+            self.settings_panel.set_status(f"Экспортировано событий: {count}", COLORS["success"])
+        except Exception as e:
+            logger.exception("SettingsWindow: journal export failed")
+            self.settings_panel.set_status(f"Ошибка экспорта: {e}", COLORS["danger"])
 
     # ===========================================================================
     # Public API
@@ -311,6 +425,36 @@ class SettingsWindow(ctk.CTkToplevel):
     def update_dnd_button(self, dnd_active: bool) -> None:
         color = COLORS["dnd_on"] if dnd_active else COLORS["btn_neutral"]
         self._btn_dnd.configure(fg_color=color)
+
+    def update_theme_selector(self, theme_mode: str) -> None:
+        self._theme_var.set(THEME_VALUE_TO_LABEL.get(theme_mode, THEME_VALUE_TO_LABEL[THEME_SYSTEM]))
+
+    def apply_theme(self) -> None:
+        self.configure(fg_color=COLORS["bg"])
+        self._scroll.configure(
+            fg_color=COLORS["bg"],
+            scrollbar_button_color=COLORS["border"],
+            scrollbar_button_hover_color=COLORS["border_glow"],
+        )
+        for frame in (getattr(self, "_app_prefs", None), getattr(self, "_obs_prefs", None)):
+            if frame is not None:
+                frame.configure(fg_color=COLORS["panel_light"])
+        if hasattr(self, "_entry_obs_url"):
+            self._entry_obs_url.configure(
+                fg_color=COLORS["bg"],
+                border_color=COLORS["border"],
+                text_color=COLORS["text"],
+            )
+        self._theme_menu.configure(
+            fg_color=COLORS["btn_neutral"],
+            button_color=COLORS["border_glow"],
+            button_hover_color=COLORS["border_glow"],
+            dropdown_fg_color=COLORS["panel"],
+            dropdown_hover_color=COLORS["border"],
+            dropdown_text_color=COLORS["text"],
+        )
+        self.sync_profile_bar(self._controller._timer.state)
+        self.update_dnd_button(self._controller._settings.get().dnd)
 
 
 class _ProfileMenuAdapter:

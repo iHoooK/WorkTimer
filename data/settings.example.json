@@ -3,7 +3,8 @@
     "dnd": false,
     "always_on_top": false,
     "sound_enabled": true,
-    "auto_switch": false
+    "auto_switch": false,
+    "theme_mode": "system"
   },
   "profiles": {
     "Работа": {

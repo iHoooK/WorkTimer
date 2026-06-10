@@ -21,7 +21,7 @@ from core.timer    import EVENT_TICK, EVENT_FINISHED, EVENT_STARTED
 from core.timer    import EVENT_PAUSED, EVENT_RESUMED, EVENT_STOPPED
 from core.profiles import Phase, Profile, ProfileRepository
 from core.settings import AppSettings, SettingsRepository
-from ui.theme      import COLORS
+from ui.theme      import COLORS, THEME_SYSTEM, get_active_theme_mode, normalize_theme_mode, set_theme_mode
 
 if TYPE_CHECKING:
     from infrastructure.sound         import SoundService
@@ -61,6 +61,7 @@ class AppController:
         tray:          "TrayManager",
         hotkeys:       "HotkeyManager",
         obs=None,      # Optional[OBSServer] — не импортируем напрямую, чтобы избежать цикла
+        journal=None,
     ) -> None:
         self._bus           = bus
         self._timer         = timer
@@ -71,6 +72,7 @@ class AppController:
         self._tray          = tray
         self._hotkeys       = hotkeys
         self._obs           = obs        # OBSServer | None
+        self._journal       = journal
         self._active_phase_index = 0
 
         # Ссылка на окно — устанавливается после создания MainWindow
@@ -100,6 +102,8 @@ class AppController:
         # Применить always_on_top
         if self._window:
             self._window.apply_always_on_top(settings.always_on_top)
+            self._apply_current_theme()
+            self._schedule_system_theme_poll()
 
         # Наполнить UI профилями
         self._refresh_profiles_ui()
@@ -155,6 +159,7 @@ class AppController:
     def _on_finished(self, event: Event) -> None:
         """Таймер завершился: звук + уведомление + диалог."""
         state: TimerState = event.data
+        self._record_journal_event(event.name, state)
 
         if self._window:
             self._window.after(0, lambda s=state: self._handle_finish(s))
@@ -225,6 +230,7 @@ class AppController:
     def _on_state_change(self, event: Event) -> None:
         """При любом изменении фазы — обновить UI и OBS."""
         state: TimerState = event.data
+        self._record_journal_event(event.name, state)
         if self._window:
             self._window.after(0, lambda s=state: self._window.update_timer(s))
         if self._obs:
@@ -462,6 +468,23 @@ class AppController:
         if self._window:
             self._window.apply_always_on_top(value)
 
+    def set_theme_mode(self, mode: str) -> None:
+        settings = self._settings.get()
+        settings.theme_mode = normalize_theme_mode(mode)
+        self._settings.save(settings)
+        self._apply_current_theme()
+        self._refresh_settings_ui()
+
+    def export_journal_csv(self, path: str) -> int:
+        if self._journal is None:
+            return 0
+        return self._journal.export_csv(path)
+
+    def get_obs_url(self) -> str:
+        if self._obs:
+            return self._obs.url
+        return "OBS server is not running"
+
     def toggle_dnd(self) -> None:
         """Переключить Do Not Disturb."""
         settings = self._settings.get()
@@ -478,6 +501,49 @@ class AppController:
     # ===========================================================================
     # Вспомогательные методы
     # ===========================================================================
+
+    def _record_journal_event(self, event_name: str, state: TimerState) -> None:
+        if self._journal is None:
+            return
+        try:
+            profile = self._profiles.get_active()
+            phases = profile.phases
+            phase = phases[self._active_phase_index] if 0 <= self._active_phase_index < len(phases) else None
+            self._journal.record(
+                event_type=event_name,
+                profile_name=profile.name,
+                phase_index=self._active_phase_index,
+                phase_name=state.phase_name,
+                phase_role=state.phase_role,
+                timer_phase=state.phase.value,
+                timer_mode=state.mode.value,
+                planned_seconds=state.total_seconds,
+                remaining_seconds=state.remaining_seconds,
+                elapsed_seconds=state.elapsed_seconds,
+                note=phase.note if phase else "",
+            )
+        except Exception:
+            logger.exception("AppController: не удалось записать событие в журнал")
+
+    def _apply_current_theme(self) -> bool:
+        previous = get_active_theme_mode()
+        resolved = set_theme_mode(self._settings.get().theme_mode)
+        if self._window:
+            self._window.apply_theme()
+            sw = self._window.get_settings_window()
+            if sw and sw.winfo_exists() and hasattr(sw, "apply_theme"):
+                sw.apply_theme()
+        return previous != resolved
+
+    def _schedule_system_theme_poll(self) -> None:
+        if not self._window or not self._window.winfo_exists():
+            return
+        self._window.after(5000, self._poll_system_theme)
+
+    def _poll_system_theme(self) -> None:
+        if self._settings.get().theme_mode == THEME_SYSTEM:
+            self._apply_current_theme()
+        self._schedule_system_theme_poll()
 
     def _refresh_profiles_ui(self) -> None:
         """Обновить селектор сцен в главном окне и в окне настроек."""
@@ -504,6 +570,9 @@ class AppController:
         self._window.settings_panel.load_settings(
             always_on_top=settings.always_on_top,
         )
+        sw = self._window.get_settings_window()
+        if sw and sw.winfo_exists() and hasattr(sw, "update_theme_selector"):
+            sw.update_theme_selector(settings.theme_mode)
         self._window.refresh_phase_selector(
             [phase.name for phase in profile.phases],
             self._active_phase_index,

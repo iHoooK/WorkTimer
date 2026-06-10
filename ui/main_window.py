@@ -36,6 +36,8 @@ def _accent_for_phase_role(role: str) -> str:
         return COLORS["rest"]
     if role == "prep":
         return COLORS["glow_purple"]
+    if role == "custom":
+        return COLORS["custom"]
     return COLORS["accent_text"]
 
 
@@ -51,10 +53,10 @@ class MainWindow(ctk.CTk):
         super().__init__()
         self._controller = controller
 
-        ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("dark-blue")
 
         self._settings_win = None   # SettingsWindow (Toplevel)
+        self._neutral_buttons = []
 
         self._setup_window()
         self._build_header()
@@ -71,7 +73,7 @@ class MainWindow(ctk.CTk):
 
 
     def _setup_window(self) -> None:
-        self.title("Focus Timer")
+        self.title("WorkTimer")
         self.resizable(False, False)
         self.configure(fg_color=COLORS["bg"])
         # Центрируем после отрисовки виджетов (вызываем в конце __init__)
@@ -91,21 +93,21 @@ class MainWindow(ctk.CTk):
 
     def _build_header(self) -> None:
         """Минималистичный хедер: символ + название."""
-        hdr = ctk.CTkFrame(self, fg_color=COLORS["panel"], corner_radius=0, height=36)
-        hdr.pack(fill="x")
-        hdr.pack_propagate(False)
+        self._hdr = ctk.CTkFrame(self, fg_color=COLORS["panel"], corner_radius=0, height=36)
+        self._hdr.pack(fill="x")
+        self._hdr.pack_propagate(False)
 
         # Мистический символ + название
         ctk.CTkLabel(
-            hdr,
-            text="✦  FOCUS TIMER",
+            self._hdr,
+            text="WorkTimer",
             font=FONTS["title"],
             text_color=COLORS["accent_text"],
         ).pack(side="left", padx=14)
 
         # Индикатор DND (маленькая точка)
         self._lbl_dnd = ctk.CTkLabel(
-            hdr,
+            self._hdr,
             text="",
             font=("Segoe UI", 9),
             text_color=COLORS["dnd_on"],
@@ -156,19 +158,19 @@ class MainWindow(ctk.CTk):
 
     def _build_profile_selector(self) -> None:
         """Компактная строка выбора профиля/сцены."""
-        row = ctk.CTkFrame(self, fg_color=COLORS["panel_light"],
-                           corner_radius=0, height=32)
-        row.pack(fill="x")
-        row.pack_propagate(False)
+        self._profile_row = ctk.CTkFrame(self, fg_color=COLORS["panel_light"],
+                                         corner_radius=0, height=32)
+        self._profile_row.pack(fill="x")
+        self._profile_row.pack_propagate(False)
 
         ctk.CTkLabel(
-            row, text="Сцена:",
+            self._profile_row, text="Сцена:",
             font=FONTS["label"], text_color=COLORS["subtext"],
         ).pack(side="left", padx=(10, 4))
 
         self._profile_var = ctk.StringVar(value="")
         self._profile_menu = ctk.CTkOptionMenu(
-            row,
+            self._profile_row,
             variable=self._profile_var,
             values=[""],
             width=180, height=22,
@@ -186,12 +188,12 @@ class MainWindow(ctk.CTk):
 
     def _build_phase_selector(self) -> None:
         """Компактная строка выбора и запуска конкретной фазы."""
-        row = ctk.CTkFrame(self, fg_color=COLORS["panel"], corner_radius=0, height=32)
-        row.pack(fill="x")
-        row.pack_propagate(False)
+        self._phase_row = ctk.CTkFrame(self, fg_color=COLORS["panel"], corner_radius=0, height=32)
+        self._phase_row.pack(fill="x")
+        self._phase_row.pack_propagate(False)
 
         ctk.CTkLabel(
-            row,
+            self._phase_row,
             text="Фаза:",
             font=FONTS["label"],
             text_color=COLORS["subtext"],
@@ -200,7 +202,7 @@ class MainWindow(ctk.CTk):
         self._phase_names: list[str] = []
         self._phase_var = ctk.StringVar(value="")
         self._phase_menu = ctk.CTkOptionMenu(
-            row,
+            self._phase_row,
             variable=self._phase_var,
             values=[""],
             width=148,
@@ -217,7 +219,7 @@ class MainWindow(ctk.CTk):
         self._phase_menu.pack(side="left", padx=4)
 
         ctk.CTkButton(
-            row,
+            self._phase_row,
             text="▶",
             width=32,
             height=22,
@@ -230,12 +232,12 @@ class MainWindow(ctk.CTk):
 
     def _build_action_bar(self) -> None:
         """Нижняя строка с иконками-кнопками."""
-        bar = ctk.CTkFrame(self, fg_color=COLORS["panel"], corner_radius=0, height=44)
-        bar.pack(fill="x", side="bottom")
-        bar.pack_propagate(False)
+        self._action_bar = ctk.CTkFrame(self, fg_color=COLORS["panel"], corner_radius=0, height=44)
+        self._action_bar.pack(fill="x", side="bottom")
+        self._action_bar.pack_propagate(False)
 
         # Центрируем кнопки через внутренний фрейм
-        inner = ctk.CTkFrame(bar, fg_color="transparent")
+        inner = ctk.CTkFrame(self._action_bar, fg_color="transparent")
         inner.place(relx=0.5, rely=0.5, anchor="center")
 
         # Базовый конфиг (без fg_color/hover_color)
@@ -253,23 +255,26 @@ class MainWindow(ctk.CTk):
         self._btn_start.pack(side="left", padx=4)
 
         # Следующая фаза — пропустить текущую и перейти дальше
-        ctk.CTkButton(
+        self._btn_next = ctk.CTkButton(
             inner, text="⏭",
             fg_color=COLORS["btn_neutral"],
             hover_color=COLORS["border_glow"],
             command=self._controller.start_next_phase,
             **btn_cfg,
-        ).pack(side="left", padx=4)
+        )
+        self._btn_next.pack(side="left", padx=4)
 
         # Тонкий разделитель
-        ctk.CTkFrame(inner, width=1, height=20, fg_color=COLORS["border"]).pack(side="left", padx=6)
+        self._action_separator = ctk.CTkFrame(inner, width=1, height=20, fg_color=COLORS["border"])
+        self._action_separator.pack(side="left", padx=6)
 
         # ⚙ Настройки
-        ctk.CTkButton(
+        self._btn_settings = ctk.CTkButton(
             inner, text="⚙",
             command=self._open_settings,
             **btn_cfg, **neutral,
-        ).pack(side="left", padx=4)
+        )
+        self._btn_settings.pack(side="left", padx=4)
 
         # 🔕 DND
         self._btn_dnd = ctk.CTkButton(
@@ -278,6 +283,7 @@ class MainWindow(ctk.CTk):
             **btn_cfg, **neutral,
         )
         self._btn_dnd.pack(side="left", padx=4)
+        self._neutral_buttons = [self._btn_next, self._btn_settings, self._btn_dnd]
 
     # ===========================================================================
     # Public API для AppController
@@ -313,6 +319,38 @@ class MainWindow(ctk.CTk):
         # Обновить SettingsWindow если открыт
         if self._settings_win and self._settings_win.winfo_exists():
             self._settings_win.sync_profile_bar(state)
+
+    def apply_theme(self) -> None:
+        self.configure(fg_color=COLORS["bg"])
+        if hasattr(self, "_hdr"):
+            self._hdr.configure(fg_color=COLORS["panel"])
+        if hasattr(self, "_profile_row"):
+            self._profile_row.configure(fg_color=COLORS["panel_light"])
+        if hasattr(self, "_phase_row"):
+            self._phase_row.configure(fg_color=COLORS["panel"])
+        if hasattr(self, "_action_bar"):
+            self._action_bar.configure(fg_color=COLORS["panel"])
+        if hasattr(self, "_action_separator"):
+            self._action_separator.configure(fg_color=COLORS["border"])
+
+        for menu in (getattr(self, "_profile_menu", None), getattr(self, "_phase_menu", None)):
+            if menu is None:
+                continue
+            menu.configure(
+                fg_color=COLORS["btn_neutral"],
+                button_color=COLORS["border_glow"],
+                button_hover_color=COLORS["border_glow"],
+                dropdown_fg_color=COLORS["panel"],
+                dropdown_hover_color=COLORS["border"],
+                dropdown_text_color=COLORS["text"],
+            )
+
+        for button in self._neutral_buttons:
+            button.configure(fg_color=COLORS["btn_neutral"], hover_color=COLORS["btn_hover"])
+
+        self._lbl_clock.configure(text_color=COLORS["text"])
+        self._progress.configure(fg_color=COLORS["border"])
+        self.update_timer(self._controller._timer.state)
 
     def apply_always_on_top(self, value: bool) -> None:
         self.attributes("-topmost", value)

@@ -20,6 +20,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+THEME_SYSTEM = "system"
+THEME_LIGHT = "light"
+THEME_DARK = "dark"
+THEME_MODES = {THEME_SYSTEM, THEME_LIGHT, THEME_DARK}
+
+
+def _normalize_theme_mode(value: object) -> str:
+    mode = str(value or THEME_SYSTEM).strip().lower()
+    return mode if mode in THEME_MODES else THEME_SYSTEM
+
 
 # ===========================================================================
 # Шаг 4.1 — AppSettings
@@ -40,6 +50,7 @@ class AppSettings:
     always_on_top: bool = False
     sound_enabled: bool = True
     auto_switch: bool   = False
+    theme_mode: str     = THEME_SYSTEM
 
     def to_dict(self) -> dict:
         """Сериализовать в словарь для JSON-хранилища."""
@@ -56,6 +67,7 @@ class AppSettings:
             always_on_top = bool(data.get("always_on_top", False)),
             sound_enabled = bool(data.get("sound_enabled", True)),
             auto_switch   = bool(data.get("auto_switch",   False)),
+            theme_mode    = _normalize_theme_mode(data.get("theme_mode", THEME_SYSTEM)),
         )
 
 
