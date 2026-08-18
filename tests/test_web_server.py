@@ -61,8 +61,35 @@ class WebServerTests(unittest.TestCase):
     def test_overlay_routes_are_limited_to_known_templates(self) -> None:
         overlay = self._endpoint("/overlay/{overlay_name}")
         self.assertTrue(str(overlay("minimal").path).endswith("web\\overlays\\minimal.html"))
+        self.assertTrue(str(overlay("progress").path).endswith("web\\overlays\\progress.html"))
         with self.assertRaises(Exception):
             overlay("unknown")
+
+    def test_scenario_api_persists_progress_configuration(self) -> None:
+        created = self._endpoint("/api/scenarios", "POST")(
+            ScenarioPayload.model_validate(
+                {
+                    "name": "Stream loop",
+                    "progress_total": 4,
+                    "phases": [
+                        {"name": "Starting", "duration_seconds": 300, "repeat_policy": "once_at_start"},
+                        {"name": "Work", "duration_seconds": 2100, "color_role": "work", "progress_marker": True},
+                        {"name": "Break", "duration_seconds": 300, "color_role": "rest"},
+                    ],
+                }
+            )
+        )
+        self.assertEqual(created["progress_total"], 4)
+        self.assertTrue(created["phases"][1]["progress_marker"])
+        listed = self._endpoint("/api/scenarios")()["items"]
+        self.assertEqual(len(listed), 1)
+        self.assertEqual(listed[0]["name"], "Stream loop")
+
+    def test_dashboard_and_assets_disable_cache(self) -> None:
+        dashboard = self._endpoint("/")()
+        asset = self._endpoint("/assets/{asset_path:path}")("app.js")
+        self.assertEqual(dashboard.headers["cache-control"], "no-store, max-age=0")
+        self.assertEqual(asset.headers["cache-control"], "no-store, max-age=0")
 
     def test_task_api_creates_group_and_task(self) -> None:
         group = self._endpoint("/api/task-groups", "POST")(TaskGroupPayload(name="WorkTimer"))

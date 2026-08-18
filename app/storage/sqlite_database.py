@@ -20,7 +20,7 @@ from app.domain.models import Phase, PhaseRepeatPolicy, Scenario, Task, TaskGrou
 class SQLiteDatabase:
     """Хранилище сценариев, настроек и будущих задач WorkTimer."""
 
-    LATEST_SCHEMA_VERSION = 2
+    LATEST_SCHEMA_VERSION = 3
 
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
@@ -54,6 +54,11 @@ class SQLiteDatabase:
             if version == 1:
                 connection.execute("ALTER TABLE tasks ADD COLUMN tags_json TEXT NOT NULL DEFAULT '[]'")
                 connection.execute("INSERT INTO schema_versions(version) VALUES (2)")
+                version = 2
+            if version == 2:
+                connection.execute("ALTER TABLE scenarios ADD COLUMN progress_total INTEGER NOT NULL DEFAULT 0 CHECK (progress_total BETWEEN 0 AND 100)")
+                connection.execute("ALTER TABLE phases ADD COLUMN progress_marker INTEGER NOT NULL DEFAULT 0 CHECK (progress_marker IN (0, 1))")
+                connection.execute("INSERT INTO schema_versions(version) VALUES (3)")
                 return
             connection.executescript(
                 """
@@ -66,6 +71,7 @@ class SQLiteDatabase:
                     id INTEGER PRIMARY KEY,
                     name TEXT NOT NULL COLLATE NOCASE UNIQUE,
                     is_archived INTEGER NOT NULL DEFAULT 0 CHECK (is_archived IN (0, 1)),
+                    progress_total INTEGER NOT NULL DEFAULT 0 CHECK (progress_total BETWEEN 0 AND 100),
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
@@ -82,6 +88,7 @@ class SQLiteDatabase:
                     sound_enabled INTEGER NOT NULL DEFAULT 1 CHECK (sound_enabled IN (0, 1)),
                     notification_enabled INTEGER NOT NULL DEFAULT 1 CHECK (notification_enabled IN (0, 1)),
                     note TEXT NOT NULL DEFAULT '',
+                    progress_marker INTEGER NOT NULL DEFAULT 0 CHECK (progress_marker IN (0, 1)),
                     UNIQUE (scenario_id, position)
                 );
 
@@ -147,14 +154,14 @@ class SQLiteDatabase:
         with self._connection() as connection:
             if scenario.id is None:
                 cursor = connection.execute(
-                    "INSERT INTO scenarios(name, is_archived) VALUES (?, ?)",
-                    (scenario.name.strip(), int(scenario.is_archived)),
+                    "INSERT INTO scenarios(name, is_archived, progress_total) VALUES (?, ?, ?)",
+                    (scenario.name.strip(), int(scenario.is_archived), scenario.progress_total),
                 )
                 scenario_id = int(cursor.lastrowid)
             else:
                 connection.execute(
-                    "UPDATE scenarios SET name = ?, is_archived = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
-                    (scenario.name.strip(), int(scenario.is_archived), scenario.id),
+                    "UPDATE scenarios SET name = ?, is_archived = ?, progress_total = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    (scenario.name.strip(), int(scenario.is_archived), scenario.progress_total, scenario.id),
                 )
                 scenario_id = scenario.id
                 # Старые фазы заменяются новыми при сохранении сценария.
@@ -168,8 +175,8 @@ class SQLiteDatabase:
                 connection.execute(
                     """INSERT INTO phases(
                         scenario_id, position, name, duration_seconds, color_role,
-                        repeat_policy, sound_enabled, notification_enabled, note
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        repeat_policy, sound_enabled, notification_enabled, note, progress_marker
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         scenario_id,
                         position,
@@ -180,6 +187,7 @@ class SQLiteDatabase:
                         int(phase.sound_enabled),
                         int(phase.notification_enabled),
                         phase.note,
+                        int(phase.progress_marker),
                     ),
                 )
         return self.get_scenario(scenario_id)
@@ -187,7 +195,7 @@ class SQLiteDatabase:
     def get_scenario(self, scenario_id: int) -> Scenario:
         with self._connection() as connection:
             scenario_row = connection.execute(
-                "SELECT id, name, is_archived FROM scenarios WHERE id = ?", (scenario_id,)
+                "SELECT id, name, is_archived, progress_total FROM scenarios WHERE id = ?", (scenario_id,)
             ).fetchone()
             if scenario_row is None:
                 raise KeyError(f"Сценарий {scenario_id} не найден")
@@ -219,7 +227,7 @@ class SQLiteDatabase:
     def list_scenarios(self) -> list[Scenario]:
         with self._connection() as connection:
             scenarios = connection.execute(
-                "SELECT id, name, is_archived FROM scenarios ORDER BY is_archived, name COLLATE NOCASE"
+                "SELECT id, name, is_archived, progress_total FROM scenarios ORDER BY is_archived, name COLLATE NOCASE"
             ).fetchall()
             phase_rows = connection.execute("SELECT * FROM phases ORDER BY scenario_id, position").fetchall()
         phases_by_scenario: dict[int, list[sqlite3.Row]] = {}
@@ -483,6 +491,7 @@ class SQLiteDatabase:
                 sound_enabled=bool(row["sound_enabled"]),
                 notification_enabled=bool(row["notification_enabled"]),
                 note=str(row["note"]),
+                progress_marker=bool(row["progress_marker"]),
             )
             for row in phase_rows
         )
@@ -490,6 +499,7 @@ class SQLiteDatabase:
             id=int(scenario_row["id"]),
             name=str(scenario_row["name"]),
             is_archived=bool(scenario_row["is_archived"]),
+            progress_total=int(scenario_row["progress_total"]),
             phases=phases,
         )
 

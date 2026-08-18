@@ -74,6 +74,7 @@ class Phase:
     sound_enabled: bool = True
     notification_enabled: bool = True
     note: str = ""
+    progress_marker: bool = False
     id: int | None = None
     position: int = 0
 
@@ -96,6 +97,7 @@ class Scenario:
     phases: tuple[Phase, ...] = field(default_factory=tuple)
     id: int | None = None
     is_archived: bool = False
+    progress_total: int = 0
 
     def validate(self) -> None:
         if not self.name.strip():
@@ -104,6 +106,13 @@ class Scenario:
             raise ValueError("Название сценария длиннее 80 символов")
         if not self.phases:
             raise ValueError("Сценарий должен содержать хотя бы одну фазу")
+        if not 0 <= self.progress_total <= 100:
+            raise ValueError("Количество рабочих фаз должно быть от 0 до 100")
+        progress_markers = sum(phase.progress_marker for phase in self.phases)
+        if self.progress_total and progress_markers != 1:
+            raise ValueError("Для конечного цикла отметьте одну рабочую фазу")
+        if not self.progress_total and progress_markers:
+            raise ValueError("Сначала укажите количество рабочих фаз")
         if not any(p.repeat_policy is not PhaseRepeatPolicy.DISABLED for p in self.phases):
             raise ValueError("В сценарии должна быть хотя бы одна активная фаза")
         for phase in self.phases:

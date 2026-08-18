@@ -91,6 +91,35 @@ class ScenarioControllerTests(unittest.TestCase):
         self.controller.start_from_beginning()
         self.assertEqual(self.controller.to_dict()["next_phase_name"], "Работа")
 
+    def test_progress_counts_when_work_phase_starts_and_stops_after_limit(self) -> None:
+        scenario = self.database.save_scenario(
+            Scenario(
+                name="Конечный стрим",
+                progress_total=4,
+                phases=(
+                    Phase("Подготовка", 60, repeat_policy=PhaseRepeatPolicy.ONCE_AT_START),
+                    Phase("Работа", 60, color_role="work", progress_marker=True),
+                    Phase("Отдых", 60, color_role="rest"),
+                ),
+            )
+        )
+        self.controller.select_scenario(scenario.id or 0)
+        self.controller.start_from_beginning()
+        self.assertEqual(self.controller.to_dict()["progress_current"], 0)
+        self.controller.next_phase()
+        self.assertEqual(self.controller.to_dict()["progress_current"], 1)
+        for expected in (2, 3, 4):
+            self.controller.next_phase()  # отдых
+            self.assertEqual(self.controller.to_dict()["progress_current"], expected - 1)
+            self.controller.next_phase()  # следующая работа
+            self.assertEqual(self.controller.to_dict()["progress_current"], expected)
+        self.controller.next_phase()  # последний отдых
+        self.controller.next_phase()  # сценарий завершён, новая работа не начинается
+        state = self.controller.to_dict()
+        self.assertEqual(state["progress_current"], 4)
+        self.assertTrue(state["scenario_completed"])
+        self.assertIsNone(state["next_phase_name"])
+
 
 if __name__ == "__main__":
     unittest.main()

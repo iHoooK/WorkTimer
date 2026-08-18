@@ -25,6 +25,8 @@ class ScenarioController:
         self._scenario_id: int | None = self._load_active_scenario_id()
         self._current_position: int | None = None
         self._is_first_cycle = True
+        self._progress_count = 0
+        self._scenario_completed = False
         self._active_task_id = self._load_active_task_id()
         self._active_entry_id: int | None = None
         if bus is not None:
@@ -85,7 +87,7 @@ class ScenarioController:
         if state.phase == TimerPhase.RUNNING:
             self._timer.pause()
             return
-        if self._current_position is None:
+        if self._current_position is None or self._scenario_completed:
             self.start_from_beginning()
             return
         phase = self._phase_by_position(self._current_position)
@@ -97,6 +99,8 @@ class ScenarioController:
     def start_from_beginning(self) -> None:
         scenario = self._require_scenario()
         self._is_first_cycle = True
+        self._progress_count = 0
+        self._scenario_completed = False
         phase = self._first_allowed_phase(scenario, first_cycle=True)
         if phase is None:
             raise ValueError("В сценарии нет активных фаз")
@@ -139,7 +143,8 @@ class ScenarioController:
             return
         phase, crossed_cycle = self._next_allowed_phase(scenario, self._current_position)
         if phase is None:
-            raise ValueError("В сценарии нет активных фаз")
+            self._scenario_completed = True
+            return
         if crossed_cycle:
             self._is_first_cycle = False
         self._start_phase(phase)
@@ -152,13 +157,14 @@ class ScenarioController:
         if phase is None:
             self.start_from_beginning()
             return
-        self._start_phase(phase)
+        self._start_phase(phase, count_progress=False)
 
     def start_phase(self, position: int) -> None:
         """Запустить конкретную фазу по явному действию пользователя."""
         phase = self._phase_by_position(position)
         if phase is None or phase.repeat_policy is PhaseRepeatPolicy.DISABLED:
             raise ValueError("Эта фаза недоступна для запуска")
+        self._scenario_completed = False
         self._start_phase(phase)
 
     def stop(self) -> None:
@@ -167,6 +173,8 @@ class ScenarioController:
         self._finish_active_entry(elapsed_seconds)
         self._current_position = None
         self._is_first_cycle = True
+        self._progress_count = 0
+        self._scenario_completed = False
 
     def to_dict(self) -> dict[str, Any]:
         state = self._timer.state
@@ -190,6 +198,9 @@ class ScenarioController:
             "current_phase_name": current_phase.name if current_phase else None,
             "next_phase_name": next_phase.name if next_phase else None,
             "is_first_cycle": self._is_first_cycle,
+            "progress_current": self._progress_count,
+            "progress_total": scenario.progress_total if scenario else 0,
+            "scenario_completed": self._scenario_completed,
             "active_task_id": self._active_task_id,
         }
 
@@ -227,11 +238,16 @@ class ScenarioController:
                 continue
             if phase.repeat_policy is PhaseRepeatPolicy.ONCE_AT_START and (crossed_cycle or not self._is_first_cycle):
                 continue
+            if phase.progress_marker and scenario.progress_total and self._progress_count >= scenario.progress_total:
+                return None, crossed_cycle
             return phase, crossed_cycle
         return None, False
 
-    def _start_phase(self, phase: Phase) -> None:
+    def _start_phase(self, phase: Phase, *, count_progress: bool = True) -> None:
         self._finish_active_entry(self._timer.state.elapsed_seconds)
+        scenario = self._require_scenario()
+        if phase.progress_marker and count_progress and scenario.progress_total:
+            self._progress_count = min(self._progress_count + 1, scenario.progress_total)
         self._current_position = phase.position
         role = phase.color_role.casefold()
         mode = TimerMode.WORK if role == "work" else TimerMode.BREAK if role == "rest" else TimerMode.CUSTOM

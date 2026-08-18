@@ -125,6 +125,10 @@ document.querySelector('[data-panel="history"] .page-heading').append(historyExp
 const historyFilterForm = document.createElement("form"); historyFilterForm.className = "history-filter"; const from = document.createElement("input"); from.type = "date"; const to = document.createElement("input"); to.type = "date"; const apply = document.createElement("button"); apply.className = "button quiet small"; apply.type = "submit"; apply.textContent = "Фильтровать"; historyFilterForm.append("Период", from, to, apply); historyFilterForm.addEventListener("submit", event => { event.preventDefault(); const params = new URLSearchParams(); if (from.value) params.set("date_from", from.value); if (to.value) params.set("date_to", to.value); historyFilter = params.size ? `?${params}` : ""; historyExport.href = `/api/history.csv${historyFilter}`; loadHistory(); }); document.querySelector('[data-panel="history"] .page-heading').append(historyFilterForm);
 
 ["minimal", "scene"].forEach(name => { $(`#${name}-url`).value = `${location.origin}/overlay/${name}`; });
+const progressOverlayRow = document.createElement("article"); progressOverlayRow.className = "overlay-row";
+const progressOverlayInfo = document.createElement("div"); const progressOverlayTitle = document.createElement("h2"); progressOverlayTitle.textContent = "Прогресс рабочих фаз"; const progressOverlayDescription = document.createElement("p"); progressOverlayDescription.textContent = "Только номер текущей рабочей фазы и общее количество. Размер: 240 × 96."; progressOverlayInfo.append(progressOverlayTitle, progressOverlayDescription);
+const progressOverlayField = document.createElement("div"); progressOverlayField.className = "copy-field"; const progressOverlayUrl = document.createElement("input"); progressOverlayUrl.readOnly = true; progressOverlayUrl.value = `${location.origin}/overlay/progress`; const progressOverlayButton = document.createElement("button"); progressOverlayButton.className = "button quiet small"; progressOverlayButton.type = "button"; progressOverlayButton.textContent = "Копировать"; progressOverlayButton.addEventListener("click", async () => { await navigator.clipboard.writeText(progressOverlayUrl.value); const original = progressOverlayButton.textContent; progressOverlayButton.textContent = "Скопировано"; setTimeout(() => { progressOverlayButton.textContent = original; }, 1200); }); progressOverlayField.append(progressOverlayUrl, progressOverlayButton);
+const progressOverlayPreview = document.createElement("iframe"); progressOverlayPreview.className = "overlay-preview"; progressOverlayPreview.title = "Предпросмотр прогресса рабочих фаз"; progressOverlayPreview.src = "/overlay/progress"; progressOverlayRow.append(progressOverlayInfo, progressOverlayField, progressOverlayPreview); $(".overlay-list").append(progressOverlayRow);
 $$('[data-copy]').forEach(button => button.addEventListener("click", async () => { const input = $(`#${button.dataset.copy}`); await navigator.clipboard.writeText(input.value); const original = button.textContent; button.textContent = "Скопировано"; setTimeout(() => { button.textContent = original; }, 1200); }));
 
 $$(".overlay-row").forEach((row, index) => { const preview = document.createElement("iframe"); preview.className = "overlay-preview"; preview.title = index === 0 ? "Предпросмотр минимального оверлея" : "Предпросмотр сценического оверлея"; preview.src = `/overlay/${index === 0 ? "minimal" : "scene"}`; row.append(preview); });
@@ -149,25 +153,32 @@ $("#preferences-form").addEventListener("submit", async event => {
 });
 
 function appendPhase(phase = { name: "Работа", duration_seconds: 1500, color_role: "work", repeat_policy: "every_cycle" }) {
-  const row = document.createElement("div"); row.className = "phase-row"; row.draggable = true;
+  const row = document.createElement("div"); row.className = "phase-row"; row.draggable = true; row.style.gridTemplateColumns = "20px minmax(120px,1fr) 90px 150px minmax(90px,.5fr) 76px 30px";
   const handle = document.createElement("span"); handle.className = "drag-handle"; handle.textContent = "⠿"; handle.setAttribute("aria-hidden", "true");
   const name = document.createElement("input"); name.name = "phase-name"; name.maxLength = 80; name.required = true; name.value = phase.name;
   const minutes = document.createElement("input"); minutes.name = "phase-minutes"; minutes.type = "number"; minutes.min = "1"; minutes.max = "1440"; minutes.required = true; minutes.value = String(Math.max(1, Math.round(phase.duration_seconds / 60)));
   const policy = document.createElement("select"); policy.name = "phase-policy";
   [["every_cycle", "Каждый цикл"], ["once_at_start", "Только в начале"], ["disabled", "Выключена"]].forEach(([value, label]) => { const option = document.createElement("option"); option.value = value; option.textContent = label; option.selected = phase.repeat_policy === value; policy.append(option); });
   const note = document.createElement("input"); note.name = "phase-note"; note.maxLength = 1000; note.placeholder = "Заметка (необязательно)"; note.value = phase.note || "";
+  const marker = document.createElement("label"); marker.className = "phase-progress-marker"; marker.style.cssText = "display:flex;align-items:center;gap:6px;font-size:12px;white-space:nowrap"; const markerInput = document.createElement("input"); markerInput.name = "phase-progress-marker"; markerInput.type = "radio"; markerInput.value = "true"; markerInput.checked = Boolean(phase.progress_marker); markerInput.style.cssText = "appearance:auto;width:auto;padding:0;border:0;accent-color:var(--accent)"; marker.append(markerInput, "Рабочая");
   const remove = document.createElement("button"); remove.className = "icon-button"; remove.type = "button"; remove.textContent = "×"; remove.setAttribute("aria-label", "Удалить фазу"); remove.addEventListener("click", () => { if ($$(".phase-row", $("#phase-editor")).length > 1) row.remove(); });
-  row.append(handle, name, minutes, policy, note, remove); $("#phase-editor").append(row);
+  row.append(handle, name, minutes, policy, note, marker, remove); $("#phase-editor").append(row);
   row.addEventListener("dragstart", () => row.classList.add("dragging")); row.addEventListener("dragend", () => row.classList.remove("dragging"));
 }
 
 function renderEditor(scenario) {
   const editor = $("#phase-editor"); editor.replaceChildren();
   $("#scenario-name").value = scenario ? scenario.name : "";
+  $("#progress-total").value = String(scenario?.progress_total || 0);
   $("#editor-title").textContent = scenario ? scenario.name : "Новый сценарий";
   $("#duplicate-scenario").disabled = !scenario; $("#archive-scenario").disabled = !scenario;
   (scenario ? scenario.phases : [{ name: "Работа", duration_seconds: 1500, color_role: "work", repeat_policy: "every_cycle" }]).forEach(appendPhase);
 }
+
+const progressTotalLabel = document.createElement("label"); progressTotalLabel.className = "progress-total-field"; progressTotalLabel.textContent = "Рабочих фаз";
+const progressTotalInput = document.createElement("input"); progressTotalInput.id = "progress-total"; progressTotalInput.type = "number"; progressTotalInput.min = "0"; progressTotalInput.max = "100"; progressTotalInput.value = "0";
+const progressTotalHint = document.createElement("small"); progressTotalHint.textContent = "0 означает бесконечный цикл. Для конечного цикла отметьте одну рабочую фазу.";
+progressTotalLabel.append(progressTotalInput, progressTotalHint); $("#scenario-name").parentElement.after(progressTotalLabel);
 
 $("#phase-editor").addEventListener("dragover", event => { event.preventDefault(); const dragging = $(".phase-row.dragging", $("#phase-editor")); const target = event.target.closest(".phase-row"); if (dragging && target && dragging !== target) $("#phase-editor").insertBefore(dragging, target); });
 $("#add-phase").addEventListener("click", () => appendPhase());
@@ -177,7 +188,7 @@ for (const [preset, label] of [["stream", "Стрим"], ["deep-work", "Глуб
   button.addEventListener("click", async () => { const response = await fetch(`/api/scenarios/presets/${preset}`, { method: "POST" }); if (response.ok) { editingScenarioId = (await response.json()).id; load(); } });
   $("#new-scenario").parentElement.append(button);
 }
-$("#scenario-editor").addEventListener("submit", async event => { event.preventDefault(); const rows = $$(".phase-row", $("#phase-editor")); const payload = { name: $("#scenario-name").value.trim(), phases: rows.map(row => ({ name: $("[name=phase-name]", row).value.trim(), duration_seconds: Number($("[name=phase-minutes]", row).value) * 60, color_role: "custom", repeat_policy: $("[name=phase-policy]", row).value, note: $("[name=phase-note]", row).value.trim() })) }; const url = editingScenarioId ? `/api/scenarios/${editingScenarioId}` : "/api/scenarios"; const response = await fetch(url, { method: editingScenarioId ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); if (response.ok) { const scenario = await response.json(); editingScenarioId = scenario.id; await postAction(`/api/scenarios/${scenario.id}/select`); await load(); } });
+$("#scenario-editor").addEventListener("submit", async event => { event.preventDefault(); const rows = $$(".phase-row", $("#phase-editor")); const payload = { name: $("#scenario-name").value.trim(), progress_total: Number($("#progress-total").value) || 0, phases: rows.map(row => ({ name: $("[name=phase-name]", row).value.trim(), duration_seconds: Number($("[name=phase-minutes]", row).value) * 60, color_role: "custom", repeat_policy: $("[name=phase-policy]", row).value, note: $("[name=phase-note]", row).value.trim(), progress_marker: $("[name=phase-progress-marker]", row).checked })) }; const url = editingScenarioId ? `/api/scenarios/${editingScenarioId}` : "/api/scenarios"; const response = await fetch(url, { method: editingScenarioId ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }); if (response.ok) { const scenario = await response.json(); editingScenarioId = scenario.id; await postAction(`/api/scenarios/${scenario.id}/select`); await load(); } });
 $("#duplicate-scenario").addEventListener("click", async () => { if (!editingScenarioId) return; const response = await fetch(`/api/scenarios/${editingScenarioId}/duplicate`, { method: "POST" }); if (response.ok) { editingScenarioId = (await response.json()).id; load(); } });
 $("#archive-scenario").addEventListener("click", async () => { if (!editingScenarioId) return; const response = await fetch(`/api/scenarios/${editingScenarioId}`, { method: "DELETE" }); if (response.ok) { editingScenarioId = null; load(); } });
 

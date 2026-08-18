@@ -34,11 +34,13 @@ class PhasePayload(BaseModel):
     sound_enabled: bool = True
     notification_enabled: bool = True
     note: str = Field(default="", max_length=1_000)
+    progress_marker: bool = False
 
 
 class ScenarioPayload(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     phases: list[PhasePayload] = Field(min_length=1, max_length=100)
+    progress_total: int = Field(default=0, ge=0, le=100)
 
 
 class TaskGroupPayload(BaseModel):
@@ -83,9 +85,9 @@ def _preset_scenario(name: str) -> Scenario:
     presets: dict[str, Scenario] = {
         "stream": Scenario("Стрим", (
             Phase("Подготовка к стриму", 600, repeat_policy=PhaseRepeatPolicy.ONCE_AT_START),
-            Phase("Работа", 1800, color_role="work"),
+            Phase("Работа", 1800, color_role="work", progress_marker=True),
             Phase("Отдых", 300, color_role="rest"),
-        )),
+        ), progress_total=4),
         "deep-work": Scenario("Глубокая работа", (
             Phase("Фокус", 3_000, color_role="work"),
             Phase("Перерыв", 600, color_role="rest"),
@@ -106,6 +108,7 @@ def _scenario_to_dict(scenario: Scenario) -> dict[str, Any]:
         "id": scenario.id,
         "name": scenario.name,
         "is_archived": scenario.is_archived,
+        "progress_total": scenario.progress_total,
         "phases": [
             {
                 "id": phase.id,
@@ -117,6 +120,7 @@ def _scenario_to_dict(scenario: Scenario) -> dict[str, Any]:
                 "sound_enabled": phase.sound_enabled,
                 "notification_enabled": phase.notification_enabled,
                 "note": phase.note,
+                "progress_marker": phase.progress_marker,
             }
             for phase in scenario.phases
         ],
@@ -149,14 +153,22 @@ def create_web_app(
 
     @app.get("/")
     def dashboard() -> FileResponse:
-        return FileResponse(web_root / "index.html", media_type="text/html")
+        return FileResponse(
+            web_root / "index.html",
+            media_type="text/html",
+            headers={"Cache-Control": "no-store, max-age=0"},
+        )
 
     @app.get("/overlay/{overlay_name}")
     def overlay(overlay_name: str) -> FileResponse:
-        allowed = {"minimal", "scene"}
+        allowed = {"minimal", "scene", "progress"}
         if overlay_name not in allowed:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Не найдено")
-        return FileResponse(web_root / "overlays" / f"{overlay_name}.html", media_type="text/html")
+        return FileResponse(
+            web_root / "overlays" / f"{overlay_name}.html",
+            media_type="text/html",
+            headers={"Cache-Control": "no-store, max-age=0"},
+        )
 
     @app.get("/assets/{asset_path:path}")
     def asset(asset_path: str) -> FileResponse:
@@ -164,7 +176,7 @@ def create_web_app(
         assets_root = (web_root / "assets").resolve()
         if assets_root not in candidate.parents or not candidate.is_file():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Не найдено")
-        return FileResponse(candidate)
+        return FileResponse(candidate, headers={"Cache-Control": "no-store, max-age=0"})
 
     @app.get("/api/health")
     def health() -> dict[str, str]:
@@ -338,6 +350,7 @@ def create_web_app(
         try:
             scenario = Scenario(
                 name=payload.name,
+                progress_total=payload.progress_total,
                 phases=tuple(
                     Phase(
                         name=phase.name,
@@ -347,6 +360,7 @@ def create_web_app(
                         sound_enabled=phase.sound_enabled,
                         notification_enabled=phase.notification_enabled,
                         note=phase.note,
+                        progress_marker=phase.progress_marker,
                         position=position,
                     )
                     for position, phase in enumerate(payload.phases)
@@ -371,7 +385,7 @@ def create_web_app(
             while unique_name.casefold() in existing_names:
                 unique_name = f"{base_name} {suffix}"
                 suffix += 1
-            created = database.save_scenario(Scenario(unique_name, scenario.phases))
+            created = database.save_scenario(Scenario(unique_name, scenario.phases, progress_total=scenario.progress_total))
             return _scenario_to_dict(created)
         except ValueError as error:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(error)) from error
@@ -384,6 +398,7 @@ def create_web_app(
                 id=existing.id,
                 name=payload.name,
                 is_archived=existing.is_archived,
+                progress_total=payload.progress_total,
                 phases=tuple(
                     Phase(
                         name=phase.name,
@@ -393,6 +408,7 @@ def create_web_app(
                         sound_enabled=phase.sound_enabled,
                         notification_enabled=phase.notification_enabled,
                         note=phase.note,
+                        progress_marker=phase.progress_marker,
                         position=position,
                     )
                     for position, phase in enumerate(payload.phases)
