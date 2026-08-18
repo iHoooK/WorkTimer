@@ -1,8 +1,13 @@
-.idea
-venv
-.agents
+.idea/
+.agents/
+.venv/
+venv/
+.packaging-venv/
+.python-build/
+PythonBuild/
 build/
 dist/
+tools/
 __pycache__/
 *.py[cod]
 *$py.class
@@ -11,3 +16,4 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 data/settings.json
+data/*.db

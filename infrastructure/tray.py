@@ -61,6 +61,8 @@ class TrayManager:
         on_start_pause: Callable,
         on_stop:        Callable,
         on_quit:        Callable,
+        on_next:        Callable | None = None,
+        on_restart:     Callable | None = None,
     ) -> None:
         """
         Создать иконку и запустить её в daemon-потоке.
@@ -71,13 +73,20 @@ class TrayManager:
             return
         try:
             img  = self._make_icon_image()
-            menu = pystray.Menu(
-                pystray.MenuItem("Показать",       lambda i, it: on_show(),        default=True),
-                pystray.MenuItem("Старт / Пауза",  lambda i, it: on_start_pause()),
-                pystray.MenuItem("Стоп",           lambda i, it: on_stop()),
+            menu_items = [
+                pystray.MenuItem("Открыть панель", lambda i, it: on_show(), default=True),
+                pystray.MenuItem("Старт / Пауза", lambda i, it: on_start_pause()),
+            ]
+            if on_next is not None:
+                menu_items.append(pystray.MenuItem("Следующая фаза", lambda i, it: on_next()))
+            if on_restart is not None:
+                menu_items.append(pystray.MenuItem("Начать сначала", lambda i, it: on_restart()))
+            menu_items.extend([
+                pystray.MenuItem("Стоп", lambda i, it: on_stop()),
                 pystray.Menu.SEPARATOR,
-                pystray.MenuItem("Выход",          lambda i, it: on_quit()),
-            )
+                pystray.MenuItem("Выход", lambda i, it: on_quit()),
+            ])
+            menu = pystray.Menu(*menu_items)
             self._icon = pystray.Icon("focus_timer", img, "Focus Timer", menu)
             threading.Thread(
                 target=self._icon.run,

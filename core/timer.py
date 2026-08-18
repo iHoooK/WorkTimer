@@ -33,6 +33,7 @@ class TimerMode(str, Enum):
     WORK  = "work"
     BREAK = "break"
     CUSTOM = "custom"
+    FREE = "free"
 
 
 class TimerPhase(str, Enum):
@@ -95,7 +96,8 @@ class TimerState:
 
     def format_time(self) -> str:
         """Форматировать remaining_seconds как MM:SS. Например: '24:59'."""
-        m, s = divmod(max(self.remaining_seconds, 0), 60)
+        value = self.elapsed_seconds if self.mode == TimerMode.FREE else self.remaining_seconds
+        m, s = divmod(max(value, 0), 60)
         return f"{m:02d}:{s:02d}"
 
     def __repr__(self) -> str:
@@ -161,6 +163,7 @@ class TimerEngine:
         self._remaining_seconds = 0
         self._elapsed_seconds   = 0
         self._phase             = TimerPhase.IDLE
+        self._count_up          = False
 
         # Мьютекс для безопасного чтения состояния из UI-потока
         self._lock = threading.Lock()
@@ -176,6 +179,7 @@ class TimerEngine:
         *,
         phase_name: str = "",
         phase_role: str | None = None,
+        count_up: bool = False,
     ) -> None:
         """
         Запустить таймер заново.
@@ -191,7 +195,7 @@ class TimerEngine:
         Raises:
             ValueError: если duration_seconds <= 0.
         """
-        if duration_seconds <= 0:
+        if duration_seconds <= 0 and not count_up:
             raise ValueError(
                 f"duration_seconds должен быть > 0, получено: {duration_seconds}"
             )
@@ -203,9 +207,10 @@ class TimerEngine:
             self._phase_name        = phase_name.strip() or self._default_phase_name(mode)
             self._phase_role        = (phase_role or mode.value).strip() or mode.value
             self._total_seconds     = duration_seconds
-            self._remaining_seconds = duration_seconds
+            self._remaining_seconds = 0 if count_up else duration_seconds
             self._elapsed_seconds   = 0
             self._phase             = TimerPhase.RUNNING
+            self._count_up          = count_up
 
         self._stop_event.clear()
         self._pause_event.set()
@@ -219,6 +224,9 @@ class TimerEngine:
 
         self._publish(EVENT_STARTED)
         logger.info("TimerEngine: старт [%s] %ds", mode.value, duration_seconds)
+
+    def start_free(self, *, phase_name: str = "Свободная работа", phase_role: str = "work") -> None:
+        self.start(0, mode=TimerMode.FREE, phase_name=phase_name, phase_role=phase_role, count_up=True)
 
     def pause(self) -> None:
         """
@@ -312,12 +320,16 @@ class TimerEngine:
 
             # Обновляем счётчики
             with self._lock:
-                self._remaining_seconds -= 1
                 self._elapsed_seconds   += 1
-                finished = self._remaining_seconds <= 0
-                if finished:
-                    self._remaining_seconds = 0
-                    self._phase = TimerPhase.FINISHED
+                if self._count_up:
+                    self._remaining_seconds = self._elapsed_seconds
+                    finished = False
+                else:
+                    self._remaining_seconds -= 1
+                    finished = self._remaining_seconds <= 0
+                    if finished:
+                        self._remaining_seconds = 0
+                        self._phase = TimerPhase.FINISHED
 
             # Публикуем tick в любом случае
             self._publish(EVENT_TICK)
@@ -339,6 +351,8 @@ class TimerEngine:
             return "Отдых"
         if mode == TimerMode.CUSTOM:
             return "Фаза"
+        if mode == TimerMode.FREE:
+            return "Свободная работа"
         return "Работа"
 
     def __repr__(self) -> str:

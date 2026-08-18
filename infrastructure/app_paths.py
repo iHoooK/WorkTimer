@@ -33,5 +33,10 @@ def get_journal_path() -> str:
     return os.path.join(ensure_app_data_dir(), "journal.json")
 
 
+def get_database_path() -> str:
+    """Путь к основной локальной SQLite-базе нового WorkTimer."""
+    return os.path.join(ensure_app_data_dir(), "worktimer.db")
+
+
 def get_legacy_project_settings_path(project_root: str) -> str:
     return os.path.join(project_root, "data", "settings.json")

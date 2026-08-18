@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>WorkTimer</title>
+  <link rel="stylesheet" href="/assets/app.css">
+  <link rel="stylesheet" href="/assets/editor.css">
+  <link rel="stylesheet" href="/assets/stream.css">
+  <link rel="stylesheet" href="/assets/tasks.css">
+  <link rel="stylesheet" href="/assets/history.css">
+  <link rel="stylesheet" href="/assets/settings.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">К содержанию</a>
+  <div class="app-shell">
+    <aside class="rail" aria-label="Основная навигация">
+      <div class="brand"><span aria-hidden="true"></span>WorkTimer</div>
+      <nav class="nav-list">
+        <button class="nav-item is-active" type="button" data-view="now">Сейчас</button>
+        <button class="nav-item" type="button" data-view="scenarios">Сценарии</button>
+        <button class="nav-item" type="button" data-view="tasks">Задачи</button>
+        <button class="nav-item" type="button" data-view="history">История</button>
+        <button class="nav-item" type="button" data-view="stream">Stream / OBS</button>
+        <button class="nav-item" type="button" data-view="settings">Настройки</button>
+      </nav>
+      <p class="rail-foot"><i></i>Локально, без облака</p>
+    </aside>
+    <main id="main" tabindex="-1">
+      <header class="topbar"><p id="view-kicker">Текущая сессия</p><div class="connection"><i></i><span id="connection-label">подключение</span></div></header>
+      <section class="view is-visible" data-panel="now">
+        <div class="focus-layout">
+          <section class="timer-stage" aria-live="polite">
+            <p class="phase-label" id="phase-name">Готов к началу</p>
+            <time id="timer-value" class="timer-value">00:00</time>
+            <div class="progress-track" aria-label="Прогресс фазы"><div id="progress-value" class="progress-value"></div></div>
+            <p class="next-copy" id="next-copy">Выберите сценарий и начните первую фазу.</p>
+            <div class="timer-actions"><button class="button primary" id="toggle-timer" type="button" disabled>Начать</button><button class="button quiet" id="next-phase" type="button" disabled>Следующая фаза</button><button class="button quiet" id="repeat-phase" type="button" disabled>Повторить</button><button class="button quiet" id="restart-scenario" type="button" disabled>Сначала</button><button class="button quiet" id="free-timer" type="button">Свободный режим</button><button class="button quiet" id="pomodoro-timer" type="button">Pomodoro</button></div>
+          </section>
+          <section class="scenario-summary" aria-labelledby="scenario-heading"><div class="section-heading"><div><p class="eyebrow">Сценарий</p><h1 id="scenario-heading">Нет активного сценария</h1></div><button class="text-button" type="button" data-view="scenarios">Изменить</button></div><ol id="phase-list" class="phase-list"><li class="empty-line">Сценарии появятся после миграции или создания.</li></ol></section>
+        </div>
+      </section>
+      <section class="view" data-panel="scenarios"><header class="page-heading"><p class="eyebrow">Ритм работы</p><h1>Сценарии</h1><p>Подготовка может выполняться один раз, а работа и отдых повторяются столько, сколько нужно.</p></header><div class="scenario-workspace"><div><div class="list-toolbar"><h2>Мои сценарии</h2><button id="new-scenario" class="text-button" type="button">Новый</button></div><div id="scenario-list" class="scenario-list"></div></div><form id="scenario-editor" class="scenario-editor"><div class="section-heading"><div><p class="eyebrow">Редактор</p><h2 id="editor-title">Новый сценарий</h2></div><div class="editor-actions"><button id="duplicate-scenario" class="text-button" type="button" disabled>Дублировать</button><button id="archive-scenario" class="text-button danger-text" type="button" disabled>В архив</button></div></div><label>Название<input id="scenario-name" name="name" maxlength="80" required placeholder="Например, Вечерний стрим"></label><div class="phase-editor-heading"><div><h3>Фазы</h3><p>Перетаскивайте строки, чтобы изменить порядок.</p></div><button id="add-phase" class="button quiet small" type="button">Добавить фазу</button></div><div id="phase-editor" class="phase-editor"></div><button class="button primary" type="submit">Сохранить сценарий</button></form></div></section>
+      <section class="view" data-panel="tasks"><header class="page-heading"><p class="eyebrow">План и факт</p><h1>Задачи</h1><p>Задача необязательна для сценария, но выбранная задача получит фактическое время из следующих запусков.</p></header><div class="tasks-workspace"><form id="task-form" class="quick-form"><input id="task-title" maxlength="160" required placeholder="Новая задача"><select id="task-group"><option value="">Без группы</option></select><button class="button primary small" type="submit">Добавить</button></form><form id="group-form" class="quick-form"><input id="group-name" maxlength="80" required placeholder="Новая группа"><select id="group-parent"><option value="">Верхний уровень</option></select><button class="button quiet small" type="submit">Создать группу</button></form><div id="task-list" class="task-list"></div></div></section>
+      <section class="view" data-panel="history"><header class="page-heading"><p class="eyebrow">Фактическое время</p><h1>История</h1><p>Только завершённые отрезки попадают в сводку. Время показывает реальную работу, а не план.</p></header><div id="history-summary" class="history-summary"></div><div id="history-list" class="history-list"></div></section>
+      <section class="view" data-panel="stream"><header class="page-heading"><p class="eyebrow">Stream / OBS</p><h1>Оверлеи</h1><p>Добавьте нужный URL как Browser Source в OBS. Оверлеи работают, пока запущен WorkTimer.</p></header><div class="overlay-list"><article class="overlay-row"><div><h2>Минимальный</h2><p>Только время и полоса прогресса. Рекомендуемый размер: 480 × 116.</p></div><div class="copy-field"><input id="minimal-url" readonly><button class="button quiet small" type="button" data-copy="minimal-url">Копировать</button></div></article><article class="overlay-row"><div><h2>Сценический</h2><p>Время, текущая фаза и сценарий для starting и break-сцен. Размер: 480 × 200.</p></div><div class="copy-field"><input id="scene-url" readonly><button class="button quiet small" type="button" data-copy="scene-url">Копировать</button></div></article></div></section>
+      <section class="view" data-panel="settings"><header class="page-heading"><p class="eyebrow">Приложение</p><h1>Настройки</h1><p>Настройки сохраняются только на этом компьютере.</p></header><form id="preferences-form" class="preferences"><label><input id="pref-sound" type="checkbox">Звук по завершении фазы</label><label><input id="pref-dnd" type="checkbox">Не показывать Windows-уведомления</label><label>Предупреждение перед окончанием, секунд<input id="pref-warning" type="number" min="0" max="1800"></label><label>Pomodoro: работа, минут<input id="pref-pomodoro-work" type="number" min="1" max="240"></label><label>Pomodoro: отдых, минут<input id="pref-pomodoro-break" type="number" min="1" max="120"></label><button class="button primary" type="submit">Сохранить настройки</button></form></section>
+    </main>
+  </div>
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>
