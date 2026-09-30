@@ -64,6 +64,8 @@ class TrayManager:
         on_quit: Callable,
         on_next: Callable | None = None,
         on_restart: Callable | None = None,
+        on_about: Callable | None = None,
+        on_help: Callable | None = None,
     ) -> None:
         """
         Создать иконку и запустить её в daemon-потоке.
@@ -82,6 +84,10 @@ class TrayManager:
                 menu_items.append(pystray.MenuItem("Следующая фаза", lambda i, it: on_next()))
             if on_restart is not None:
                 menu_items.append(pystray.MenuItem("Начать сначала", lambda i, it: on_restart()))
+            if on_about is not None:
+                menu_items.append(pystray.MenuItem("О программе", lambda i, it: on_about()))
+            if on_help is not None:
+                menu_items.append(pystray.MenuItem("Руководство", lambda i, it: on_help()))
             menu_items.extend(
                 [
                     pystray.MenuItem("Стоп", lambda i, it: on_stop()),

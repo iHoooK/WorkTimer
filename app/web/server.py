@@ -8,8 +8,11 @@ import csv
 import io
 import json
 import logging
+import platform
 import secrets
 import sqlite3
+import struct
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -21,11 +24,14 @@ from typing import Any
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
+from app.documentation import DOC_CSS, DOCUMENTS, document_source, render_document
 from app.domain import Phase, PhaseRepeatPolicy, Scenario, Task, TaskGroup, TaskStatus
+from app.product import AUTHOR, COPYRIGHT, DONATIONS, LINKS, NAME, SITE_URL, SUPPORT_URL, VERSION
 from app.services import ScenarioController
+from app.services.updates import UpdateService
 from app.storage import SQLiteDatabase
 
 logger = logging.getLogger(__name__)
@@ -72,6 +78,7 @@ class PomodoroPayload(BaseModel):
 
 
 class PreferencesPayload(BaseModel):
+    auto_check_updates: bool = True
     sound_enabled: bool = True
     dnd: bool = False
     warning_seconds: int = Field(default=60, ge=0, le=1800)
@@ -142,6 +149,7 @@ def create_web_app(
     state_provider: Callable[[], dict[str, Any]] | None = None,
     controller: ScenarioController | None = None,
     on_quit: Callable[[], None] | None = None,
+    updates: UpdateService | None = None,
 ) -> FastAPI:
     database.migrate()
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
@@ -149,6 +157,7 @@ def create_web_app(
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
     token = secrets.token_urlsafe(32)
     web_root = Path(__file__).resolve().parents[2] / "web"
+    product_root = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parents[2]
     state = state_provider or (controller.to_dict if controller else lambda: {"phase": "idle", "time": "00:00"})
 
     @app.middleware("http")
@@ -205,6 +214,58 @@ def create_web_app(
     def favicon():
         return FileResponse(web_root / "assets" / "worktimer.ico")
 
+    @app.get("/help/licenses/{license_path:path}")
+    def component_license(license_path: str):
+        root = (product_root / "licenses").resolve()
+        candidate = (root / license_path).resolve()
+        if root not in candidate.parents or not candidate.is_file():
+            raise HTTPException(404, "Не найдено")
+        if candidate.suffix == ".gz":
+            return FileResponse(candidate, filename=candidate.name)
+        return FileResponse(candidate, media_type="text/plain; charset=utf-8")
+
+    @app.get("/help/{document}")
+    def help_document(document: str):
+        if document == "docs.css":
+            return Response(DOC_CSS, media_type="text/css")
+        if document == "LICENSE.txt":
+            return FileResponse(product_root / ("LICENSE.txt" if getattr(sys, "frozen", False) else "LICENSE"),
+                                media_type="text/plain; charset=utf-8")
+        if document not in DOCUMENTS:
+            raise HTTPException(404, "Не найдено")
+        if getattr(sys, "frozen", False):
+            return FileResponse(product_root / document, media_type="text/html")
+        return HTMLResponse(render_document(document, document_source(product_root, document)))
+
+    @app.get("/api/about")
+    def about():
+        return {"name": NAME, "version": VERSION, "author": AUTHOR, "copyright": COPYRIGHT,
+                "site": SITE_URL, "support": SUPPORT_URL, "links": LINKS, "donations": DONATIONS}
+
+    @app.get("/api/diagnostics")
+    def diagnostics(request: Request):
+        if not secrets.compare_digest(request.headers.get("x-worktimer-token", ""), token):
+            raise HTTPException(403, "Обновите страницу панели")
+        return {"text": f"{NAME} {VERSION}\nОС: {platform.system()} {platform.release()} "
+                f"({platform.version()})\nРазрядность: {struct.calcsize('P') * 8} bit\nPython: {platform.python_version()}"}
+
+    def require_updates():
+        if updates is None:
+            raise HTTPException(503, "Проверка обновлений недоступна")
+        return updates
+
+    @app.get("/api/updates")
+    def update_status():
+        return require_updates().status()
+
+    @app.post("/api/updates/check")
+    def check_updates():
+        return require_updates().check()
+
+    @app.post("/api/updates/install")
+    def install_update():
+        return require_updates().install()
+
     @app.get("/overlay/{overlay_name}")
     def overlay(overlay_name: str) -> FileResponse:
         if overlay_name not in {"minimal", "scene", "progress"}:
@@ -236,7 +297,7 @@ def create_web_app(
 
     @app.get("/api/health")
     def health():
-        return {"status": "ok", "app": "WorkTimer", "version": "1.0.0"}
+        return {"status": "ok", "app": NAME, "version": VERSION}
 
     @app.get("/api/bootstrap")
     def bootstrap():

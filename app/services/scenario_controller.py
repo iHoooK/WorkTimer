@@ -309,6 +309,13 @@ class ScenarioController:
         self._database.checkpoint_runtime(None)
 
     @serialized
+    def pause_for_update(self) -> None:
+        self._cancel_auto()
+        if self._timer.state.is_running:
+            self._timer.pause()
+        self._checkpoint()
+
+    @serialized
     def suspend_for_exit(self) -> None:
         # Graceful application exit preserves the session, paused on next launch.
         self._cancel_auto()

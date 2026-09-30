@@ -1,0 +1,15 @@
+{
+  "version": "1.0.1",
+  "unit_tests": 59,
+  "lint": "passed",
+  "portable_runtime": "passed",
+  "installer_install_uninstall": "passed",
+  "external_lgpl_replacement": "passed",
+  "runtime_package_licenses": 19,
+  "responsive_widths": [
+    390,
+    1280
+  ],
+  "browser_console_errors": 0,
+  "code_signing": "not signed; no certificate supplied"
+}

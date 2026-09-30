@@ -10,10 +10,14 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from app.product import AUTHOR, COPYRIGHT, DONATIONS, SITE_URL, SUPPORT_URL, VERSION  # noqa: E402
+from scripts.release_documents import prepare_release_documents, write_version_resource  # noqa: E402
+
 BUILD = ROOT / "Build"
 WORK = ROOT / ".build-work"
 STAGING = WORK / "release"
-VERSION = "1.0.0"
 PORTABLE_NAME = "Work Timer Portable"
 INSTALLER_NAME = f"WorkTimer-Setup-{VERSION}.exe"
 
@@ -82,7 +86,17 @@ def compiler():
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--skip-tests", action="store_true")
+    parser.add_argument("--sign-thumbprint", help="Code signing certificate SHA-1 thumbprint in CurrentUser store")
+    parser.add_argument("--signtool", default="signtool", help="Path to Microsoft SignTool")
+    parser.add_argument("--timestamp-url", help="HTTPS RFC3161 timestamp server supplied by the certificate issuer")
     args = parser.parse_args()
+    if bool(args.sign_thumbprint) != bool(args.timestamp_url):
+        parser.error("Signing requires both --sign-thumbprint and --timestamp-url")
+    if args.sign_thumbprint and (len(args.sign_thumbprint) != 40 or
+                                not all(c in "0123456789abcdefABCDEF" for c in args.sign_thumbprint)):
+        parser.error("Certificate thumbprint must contain 40 hexadecimal characters")
+    if args.timestamp_url and not args.timestamp_url.startswith("https://"):
+        parser.error("Timestamp URL must use HTTPS")
     if os.name != "nt":
         raise RuntimeError("Windows EXE собирается на Windows. Используйте Git Bash, не WSL.")
     iscc = compiler()
@@ -97,6 +111,8 @@ def main():
         run(sys.executable, "-m", "unittest", "discover", "-s", "tests", "-q")
         run(sys.executable, "-m", "pip", "check")
     run(sys.executable, "scripts/make_icon.py")
+    resource = WORK / "version-info.txt"
+    write_version_resource(resource)
     run(
         sys.executable,
         "-m",
@@ -115,12 +131,18 @@ def main():
         str(WORK),
         "--icon",
         str(ROOT / "web/assets/worktimer.ico"),
+        "--version-file",
+        str(resource),
         "--add-data",
         f"{ROOT / 'web'};web",
         "--collect-submodules",
         "uvicorn",
+        "--exclude-module",
+        "pystray",
         "--hidden-import",
-        "pystray._win32",
+        "six",
+        "--copy-metadata",
+        "six",
         "--hidden-import",
         "plyer.platforms.win.notification",
         "--recursive-copy-metadata",
@@ -132,24 +154,65 @@ def main():
         "--recursive-copy-metadata",
         "plyer",
         "--recursive-copy-metadata",
-        "pystray",
-        "--recursive-copy-metadata",
         "keyboard",
         "main.py",
     )
     portable = STAGING / PORTABLE_NAME
     owned_path(portable, WORK)
     (STAGING / "WorkTimer").rename(portable)
+    prepare_release_documents(portable)
+    if args.sign_thumbprint:
+        sign_file(portable / "WorkTimer.exe", args)
     run(sys.executable, "scripts/smoke_runtime.py", "--exe", str(portable / "WorkTimer.exe"))
+    run(sys.executable, "scripts/smoke_lgpl.py", "--exe", str(portable / "WorkTimer.exe"))
+    setup_license = WORK / "License.ru.txt"
+    setup_license.write_text(
+        "WorkTimer — бесплатное приложение для личного и коммерческого использования.\n\n"
+        "Собственный код и документация — MIT. Можно использовать, изменять и распространять копии,\n"
+        "включая продажу, сохраняя уведомление об авторе и лицензию. Программа предоставляется как есть.\n"
+        "Ограничения ответственности действуют в пределах применимого законодательства.\n\n"
+        + (ROOT / "LICENSE").read_text(encoding="utf-8")
+        + "\n\nСторонние компоненты сохраняют собственные лицензии.\n"
+        + (ROOT / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8"), encoding="utf-8-sig",
+    )
+    setup_info = WORK / "Setup-info.ru.txt"
+    setup_info.write_text(
+        "WorkTimer — локальный таймер для работы и стримов.\n\n"
+        "Сценарии, Pomodoro, задачи, история времени и оверлеи OBS.\n"
+        "Windows 10/11 x64; современный браузер. Python отдельно не нужен.\n"
+        "Программа работает в трее; закрытие браузера не завершает таймер.\n"
+        "Нет аккаунтов, рекламы и телеметрии. Данные сохраняются локально.\n"
+        "Удаление программы сохраняет историю. Правила удаления данных — в руководстве.\n\n"
+        f"Автор: {AUTHOR}\nСайт: {SITE_URL}\nВопросы: {SUPPORT_URL}\n"
+        "YouTube: https://www.youtube.com/@promptix\nTelegram: https://t.me/promptix_ru\n"
+        f"Поддержка разработки добровольна:\n{'\n'.join(url for _, url in DONATIONS)}\n"
+        "После установки справка и юридические документы доступны без интернета.\n",
+        encoding="utf-8-sig",
+    )
     run(
         iscc,
         f"/DAppVersion={VERSION}",
         f"/DSourceDir={portable}",
         f"/DOutputDir={STAGING}",
+        f"/DLicensePath={setup_license}",
+        f"/DInfoPath={setup_info}",
+        f"/DPublisherURL={SITE_URL}",
+        f"/DSupportURL={SUPPORT_URL}",
+        f"/DPublisherName={AUTHOR}",
+        f"/DCopyrightNotice={COPYRIGHT}",
         str(ROOT / "scripts/installer.iss"),
     )
+    if args.sign_thumbprint:
+        sign_file(STAGING / INSTALLER_NAME, args)
     publish_release(STAGING)
+    run(sys.executable, "scripts/github_release.py")
     print(f"Готово: Build/{PORTABLE_NAME}/WorkTimer.exe и Build/{INSTALLER_NAME}")
+
+
+def sign_file(path: Path, args):
+    run(args.signtool, "sign", "/sha1", args.sign_thumbprint, "/fd", "SHA256", "/tr", args.timestamp_url,
+        "/td", "SHA256", str(path))
+    run(args.signtool, "verify", "/pa", str(path))
 
 
 if __name__ == "__main__":

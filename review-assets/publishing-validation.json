@@ -1,0 +1,16 @@
+{
+  "version": "1.0.2",
+  "assets": [
+    "SHA256SUMS",
+    "WorkTimer-Portable-1.0.2.zip",
+    "WorkTimer-Setup-1.0.2.exe"
+  ],
+  "sha256": "passed",
+  "zip_crc": "passed",
+  "portable_runtime_help_and_licenses": "passed",
+  "archive_has_no_databases_logs_or_build_tools": true,
+  "guide_and_notes_have_no_unresolved_template_variables": true,
+  "full_build_and_70_tests": "passed",
+  "published": false,
+  "publication": "user will upload manually"
+}

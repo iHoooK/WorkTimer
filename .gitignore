@@ -8,6 +8,7 @@ venv/
 PythonBuild/
 build/
 Build/
+Release/
 .playwright-mcp/
 dist/
 tools/
@@ -20,3 +21,4 @@ __pycache__/
 .ruff_cache/
 data/settings.json
 data/*.db
+data/journal.json

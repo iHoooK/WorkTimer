@@ -29,6 +29,9 @@ def main() -> int:
     from infrastructure.instance import InstanceLock
 
     directory = Path(ensure_app_data_dir())
+    if getattr(sys, "frozen", False):
+        # LGPL library stays outside the frozen archive, replaceable without rebuilding the application.
+        sys.path.insert(0, str(Path(sys.executable).parent / "components"))
     lock = InstanceLock(str(directory), args.port)
     if not lock.acquire():
         port = lock.existing_port()
@@ -44,12 +47,13 @@ def main() -> int:
         level=logging.INFO, handlers=handlers, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s", force=True
     )
     logger = logging.getLogger(__name__)
-    timer = controller = server = bridge = None
+    timer = controller = server = bridge = updates = None
     exit_timer = None
     stopped = threading.Event()
     try:
         from app.desktop import DesktopBridge
         from app.services import ScenarioController
+        from app.services.updates import UpdateService
         from app.storage import SQLiteDatabase
         from app.web import LocalWebServer, create_web_app
         from core.events import EventBus
@@ -66,7 +70,18 @@ def main() -> int:
         bus = EventBus()
         timer = TimerEngine(bus)
         controller = ScenarioController(database, timer, bus)
-        server = LocalWebServer(create_web_app(database, controller.to_dict, controller, stopped.set), port=args.port)
+        notifications = NotificationService(app_name="WorkTimer")
+
+        def notify_update(version):
+            preferences = database.get_setting("app_preferences", {})
+            notifications.dnd = bool(preferences.get("dnd", False)) if isinstance(preferences, dict) else False
+            notifications.notify("Доступно обновление WorkTimer", f"Версия {version}. Откройте «О программе», чтобы обновить.")
+
+        updates = UpdateService(database, on_quit=stopped.set, prepare=controller.pause_for_update,
+                                port=args.port, on_available=notify_update, no_browser=args.no_browser,
+                                no_tray=args.no_tray, no_hotkeys=args.no_hotkeys)
+        server = LocalWebServer(create_web_app(database, controller.to_dict, controller, stopped.set, updates),
+                                port=args.port)
         server.start()
         bridge = DesktopBridge(
             bus=bus,
@@ -74,12 +89,13 @@ def main() -> int:
             tray=TrayManager(),
             hotkeys=HotkeyManager(),
             sound=SoundService(strategy=WinsoundStrategy(), enabled=True),
-            notifications=NotificationService(app_name="WorkTimer"),
+            notifications=notifications,
             database=database,
             dashboard_url=server.url,
             on_quit=stopped.set,
         )
         bridge.start(enable_tray=not args.no_tray, enable_hotkeys=not args.no_hotkeys)
+        updates.start()
         logger.info("WorkTimer ready: %s; data: %s", server.url, directory)
         if not args.no_browser:
             webbrowser.open(server.url, new=0)
@@ -101,6 +117,8 @@ def main() -> int:
             )
         return 1
     finally:
+        if updates:
+            updates.stop()
         if exit_timer:
             exit_timer.cancel()
         if bridge:

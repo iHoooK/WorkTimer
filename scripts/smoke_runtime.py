@@ -63,6 +63,9 @@ def main():
     try:
         launch()
         assert request("/api/health")["app"] == "WorkTimer"
+        about = request("/api/about")
+        assert about["version"] == request("/api/health")["version"] and about["author"]
+        assert "WorkTimer" in request("/api/diagnostics")["text"]
         second = subprocess.run(
             command, cwd=ROOT, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
         )
@@ -104,6 +107,13 @@ def main():
             "/overlay/minimal",
             "/overlay/scene",
             "/overlay/progress",
+            "/help/HELP.html",
+            "/help/LICENSE.html",
+            "/help/PRIVACY.html",
+            "/help/THIRD_PARTY_NOTICES.html",
+            "/help/CHANGELOG.html",
+            "/help/docs.css",
+            "/help/LICENSE.txt",
         ]:
             with urllib.request.urlopen(base + path, timeout=5) as response:
                 assert response.status == 200 and response.read()
@@ -132,6 +142,7 @@ def main():
             "port_conflict_handled": True,
             "graceful_quit": True,
             "graceful_quit_with_open_sse": True,
+            "offline_help_and_legal_documents": True,
             "restored_elapsed_seconds": restored["elapsed_seconds"],
         }
         (directory / "result.json").write_text(json.dumps(evidence, ensure_ascii=False, indent=2), encoding="utf-8")

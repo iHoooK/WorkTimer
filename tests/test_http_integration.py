@@ -11,6 +11,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from app.domain import Phase, Scenario, Task
+from app.product import VERSION
 from app.services import ScenarioController
 from app.storage import SQLiteDatabase
 from app.web import create_web_app
@@ -71,6 +72,23 @@ class HTTPIntegrationTests(unittest.TestCase):
     def test_localhost_host_guard_and_traversal(self):
         self.assertEqual(self.client.get("/api/health", headers={"host": "evil.example"}).status_code, 400)
         self.assertEqual(self.client.get("/assets/%2e%2e%2f%2e%2e%2fREADME.md").status_code, 404)
+
+    def test_about_documents_and_private_diagnostics(self):
+        self.db.save_task(Task("DO NOT INCLUDE THIS PRIVATE TASK"))
+        about = self.client.get("/api/about").json()
+        self.assertEqual(about["version"], VERSION)
+        self.assertEqual(self.client.get("/api/health").json()["version"], VERSION)
+        diagnostic = self.client.get("/api/diagnostics").json()["text"]
+        self.assertNotIn("DO NOT INCLUDE", diagnostic)
+        self.assertNotIn(str(self.db.path) if hasattr(self.db, "path") else self.temp.name, diagnostic)
+        self.assertEqual(self.client.get("/api/diagnostics", headers={"x-worktimer-token": ""}).status_code, 403)
+        for name in ("HELP.html", "LICENSE.html", "PRIVACY.html", "THIRD_PARTY_NOTICES.html", "CHANGELOG.html"):
+            page = self.client.get("/help/" + name)
+            self.assertEqual(page.status_code, 200)
+            self.assertIn('lang="ru"', page.text)
+            self.assertIn("WorkTimer", page.text)
+        self.assertEqual(self.client.get("/help/%2e%2e%2fREADME.md").status_code, 404)
+        self.assertEqual(self.client.get("/help/licenses/%2e%2e%2f%2e%2e%2fmain.py").status_code, 404)
 
     def test_live_extension_and_save_preserve_second_of_three(self):
         scenario = self.scenario()

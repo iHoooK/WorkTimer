@@ -1,0 +1,50 @@
+name: Windows release
+on:
+  push:
+    tags:
+      - 'v[0-9]*.[0-9]*.[0-9]*'
+permissions:
+  contents: write
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.14'
+      - name: Verify version
+        shell: pwsh
+        run: |
+          python -c "import os; from app.product import VERSION; assert os.environ['GITHUB_REF_NAME'] == 'v' + VERSION, 'Tag must match app/product.py'"
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+      - name: Build and test
+        shell: bash
+        run: bash scripts/build.sh
+      - name: Verify installation and update
+        shell: pwsh
+        run: .packaging-venv/Scripts/python.exe scripts/smoke_installer.py
+      - name: Prepare release assets
+        shell: pwsh
+        run: .packaging-venv/Scripts/python.exe scripts/github_release.py
+      - name: Create draft release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $taskVersion = python -c "from app.product import VERSION; print(VERSION)"
+          gh release view "v$taskVersion" --repo "$env:GITHUB_REPOSITORY" *> $null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "Release v$taskVersion already exists; uploaded files are preserved."
+            exit 0
+          }
+          gh release create "v$taskVersion" "Release/Uploads/WorkTimer-Setup-$taskVersion.exe" "Release/Uploads/WorkTimer-Portable-$taskVersion.zip" "Release/Uploads/SHA256SUMS" --repo "$env:GITHUB_REPOSITORY" --verify-tag --draft --title "WorkTimer $taskVersion — таймер для работы и стримов" --notes-file "Release/RELEASE_NOTES.md"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

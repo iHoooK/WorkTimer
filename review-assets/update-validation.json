@@ -1,0 +1,13 @@
+{
+  "version": "1.0.2",
+  "unit_tests_passed": 70,
+  "ruff": "passed",
+  "windows_build": "passed",
+  "installer_update_smoke": "passed",
+  "preserved_profile_port_tasks_preferences_paused_session": true,
+  "browser_desktop_and_390px": "passed",
+  "browser_update_offer_confirm_and_progress": "passed with mocked release responses",
+  "github_latest_release_http_status": 404,
+  "release_assets_checksums": "passed",
+  "cloud_workflow": "prepared, not run; no release published"
+}

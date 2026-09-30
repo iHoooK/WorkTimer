@@ -1,0 +1,5 @@
+import {$,node,api,perform,message} from './shared.js';
+
+function link(label,url){const a=node('a',`${label} ↗`,'button');a.href=url;a.target='_blank';a.rel='noopener noreferrer';return a;}
+perform(async()=>{const product=await api('/api/about');$('#about-version').textContent=`Версия ${product.version}`;$('#about-copyright').textContent=product.copyright;$('#developer-links').replaceChildren(...product.links.map(([label,url])=>link(label,url)));$('#donation-links').replaceChildren(...product.donations.map(([label,url])=>link(label,url)));$('#support-link').href=product.support;});
+$('#copy-diagnostics').addEventListener('click',()=>perform(async()=>{const {text}=await api('/api/diagnostics');$('#diagnostics-text').value=text;$('#diagnostics-preview').hidden=false;try{await navigator.clipboard.writeText(text);message('Диагностика скопирована. Вы сами выбираете, куда её отправить.');}catch{$('#diagnostics-text').focus();$('#diagnostics-text').select();message('Выделенная диагностика готова к копированию: нажмите Ctrl+C.');}},$('#copy-diagnostics')));

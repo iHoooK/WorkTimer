@@ -71,6 +71,8 @@ class DesktopBridge:
                 on_restart=self._safe_command(self._controller.start_from_beginning),
                 on_stop=self._safe_command(self._controller.stop),
                 on_quit=self._on_quit,
+                on_about=lambda: webbrowser.open(self._dashboard_url + "/#about", new=0),
+                on_help=lambda: webbrowser.open(self._dashboard_url + "/help/HELP.html", new=0),
             )
 
     def stop(self) -> None:

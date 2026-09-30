@@ -21,6 +21,6 @@ export async function download(path, filename) { const response = await fetch(pa
 export function field(label, control) { const el = node('label', label); control.setAttribute('aria-label',label); el.append(control); return el; }
 export function input(type, value = '', props = {}) { const el = node('input'); el.type = type; el.value = value ?? ''; Object.assign(el, props); return el; }
 let dialogSave;
-export function openDialog(title, fields, save) { $('#dialog-title').textContent = title; $('#dialog-fields').replaceChildren(...fields); $('#dialog-error').textContent = ''; dialogSave = save; $('#form-dialog').showModal(); }
+export function openDialog(title, fields, save, submitLabel = 'Сохранить') { $('#dialog-form button[type=submit]').textContent = submitLabel; $('#dialog-title').textContent = title; $('#dialog-fields').replaceChildren(...fields); $('#dialog-error').textContent = ''; dialogSave = save; $('#form-dialog').showModal(); }
 $('#dialog-form').addEventListener('submit', async e => { e.preventDefault(); const submit = $('button[type=submit]', e.target); submit.disabled = true; try { await dialogSave(); $('#form-dialog').close(); } catch (error) { $('#dialog-error').textContent = error.message; } finally { submit.disabled = false; } });
 for (const id of ['close-dialog','cancel-dialog']) $(`#${id}`).addEventListener('click', () => $('#form-dialog').close());
