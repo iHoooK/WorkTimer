@@ -1,7 +1,7 @@
 """Public product identity shared by the runtime, documentation and release tools."""
 
 NAME = "WorkTimer"
-VERSION = "1.0.2"
+VERSION = "1.0.3"
 REPOSITORY = "iHoooK/WorkTimer"
 RELEASES_URL = f"https://github.com/{REPOSITORY}/releases"
 AUTHOR = "Promptix"

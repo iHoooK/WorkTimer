@@ -7,7 +7,6 @@ import json
 import logging
 import os
 import re
-import subprocess
 import sys
 import tempfile
 import threading
@@ -21,6 +20,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from app.product import RELEASES_URL, REPOSITORY, VERSION
 from app.storage import SQLiteDatabase
+from infrastructure.windows_setup import launch_installer
 
 logger = logging.getLogger(__name__)
 MAX_INSTALLER = 300 * 1024 * 1024
@@ -39,12 +39,15 @@ def installed_directory() -> Path | None:
         return None
     import winreg
 
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, REGISTRY_KEY, 0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as key:
-            location = Path(winreg.QueryValueEx(key, "InstallLocation")[0]).resolve()
-        return location if location == Path(sys.executable).resolve().parent else None
-    except (OSError, ValueError, TypeError):
-        return None
+    for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+        try:
+            with winreg.OpenKey(hive, REGISTRY_KEY, 0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY) as key:
+                location = Path(winreg.QueryValueEx(key, "InstallLocation")[0]).resolve()
+            if location == Path(sys.executable).resolve().parent:
+                return location
+        except (OSError, ValueError, TypeError):
+            continue
+    return None
 
 
 def trusted_url(url: str) -> bool:
@@ -185,7 +188,7 @@ class UpdateService:
         with self._lock:
             if self._stop.is_set():
                 raise ValueError("WorkTimer завершает работу")
-            if self._state["status"] in {"checking", "downloading", "installing"}:
+            if self._state["status"] in {"checking", "downloading", "authorizing", "installing"}:
                 return self.status()
             if time.monotonic() - self._last_request < 60:
                 return self.status()
@@ -230,7 +233,7 @@ class UpdateService:
                 raise ValueError("WorkTimer завершает работу")
             if self.directory is None:
                 raise ValueError("Обновление через установщик доступно установленной версии Windows. Откройте релизы")
-            if self._state["status"] in {"downloading", "installing"}:
+            if self._state["status"] in {"downloading", "authorizing", "installing"}:
                 return self.status()
             if self._release is None or self._state["status"] not in {"available", "error"}:
                 raise ValueError("Сначала проверьте наличие новой версии")
@@ -269,18 +272,20 @@ class UpdateService:
                     raise ValueError("Загруженный файл не является Windows-установщиком")
             if self._stop.is_set():
                 raise ValueError("Установка отменена: WorkTimer завершает работу")
-            self.prepare()
-            self.database.backup(label=f"before-update-{release.version}")
-            # Setup waits for this process to exit before touching installed files.
-            subprocess.Popen(
+            self._set(status="authorizing", message="Подтвердите запрос прав администратора Windows для обновления")
+            # Keep the timer alive until Setup acknowledges its post-UAC startup.
+            launched = True
+            launch_installer(
                 [str(installer), "/SP-", "/SILENT", "/NORESTART", "/NOCLOSEAPPLICATIONS",
                  f"/DIR={self.directory}", "/WORKTIMERUPDATE=1", f"/WORKTIMERPID={os.getpid()}",
+                 "/WORKTIMERHANDOFF=1",
                  f"/WORKTIMERPORT={self.port}", f"/WORKTIMERDATA={self.database.path.parent}",
                  *(f"/WORKTIMER{flag}={int(enabled)}" for flag, enabled in self.restart_flags.items()),
                  f"/LOG={folder / 'install.log'}"],
-                cwd=folder, close_fds=True,
+                cwd=folder, cancelled=self._stop,
             )
-            launched = True
+            self.prepare()
+            self.database.backup(label=f"before-update-{release.version}")
             self._set(status="installing", message="Установщик запущен. WorkTimer перезапустится после обновления")
             self.on_quit()
         except Exception as error:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import json
 import os
 import socket
@@ -100,21 +101,27 @@ def verify_update(installer: Path, exe: Path, folder: Path):
 
 
 def main():
+    if not ctypes.windll.shell32.IsUserAnAdmin():
+        raise RuntimeError("Проверка установки в Program Files требует запуска терминала от администратора.")
     # Do not replace an existing user's installation or shortcut during verification.
-    try:
-        handle = winreg.OpenKey(winreg.HKEY_CURRENT_USER, REGISTRY)
-    except FileNotFoundError:
-        pass
-    else:
-        handle.Close()
-        raise RuntimeError("WorkTimer уже установлен: автоматическая проверка не заменяет существующую установку.")
-    startmenu = Path(os.environ["APPDATA"]) / "Microsoft/Windows/Start Menu/Programs/WorkTimer Verification"
+    for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+        try:
+            handle = winreg.OpenKey(hive, REGISTRY, 0, winreg.KEY_READ | winreg.KEY_WOW64_64KEY)
+        except FileNotFoundError:
+            continue
+        else:
+            handle.Close()
+            raise RuntimeError("WorkTimer уже установлен: автоматическая проверка не заменяет существующую установку.")
+    startmenu = Path(os.environ["PROGRAMDATA"]) / "Microsoft/Windows/Start Menu/Programs/WorkTimer Verification"
     if startmenu.exists():
         raise RuntimeError("Каталог тестовых ярлыков уже существует")
     smoke_root = ROOT / ".build-work" / "smoke"
     smoke_root.mkdir(parents=True, exist_ok=True)
     folder = Path(tempfile.mkdtemp(prefix="install-", dir=smoke_root))
-    target = folder / "Program"
+    program_files = Path(os.environ.get("PROGRAMW6432") or os.environ["PROGRAMFILES"]).resolve()
+    target = program_files / f"WorkTimer Verification-{folder.name}"
+    if target.exists():
+        raise RuntimeError("Каталог проверочной установки уже существует")
     installer = ROOT / f"Build/WorkTimer-Setup-{VERSION}.exe"
     installed = False
     try:
@@ -124,7 +131,6 @@ def main():
                 "/VERYSILENT",
                 "/SUPPRESSMSGBOXES",
                 "/NORESTART",
-                "/CURRENTUSER",
                 f"/DIR={target}",
                 "/GROUP=WorkTimer Verification",
                 "/TASKS=",
@@ -169,6 +175,7 @@ def main():
     assert not startmenu.exists()
     result = {
         "passed": True,
+        "installed_under_program_files": True,
         "installed_exe_launched": True,
         "start_menu_shortcut_target_verified": True,
         "uninstall_removed_program_and_shortcut": True,

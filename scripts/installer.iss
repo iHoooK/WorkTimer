@@ -24,9 +24,10 @@ VersionInfoCopyright={#CopyrightNotice}
 LicenseFile={#LicensePath}
 InfoBeforeFile={#InfoPath}
 MinVersion=10.0
-DefaultDirName={localappdata}\Programs\WorkTimer
+DefaultDirName={commonpf64}\WorkTimer
+UsePreviousAppDir=no
 DefaultGroupName=WorkTimer
-PrivilegesRequired=lowest
+PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir={#OutputDir}
@@ -54,7 +55,7 @@ Name: "{group}\Удалить WorkTimer"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\WorkTimer"; Filename: "{app}\WorkTimer.exe"; Tasks: desktopicon
 [Run]
 Filename: "{app}\WorkTimer.exe"; Description: "Запустить WorkTimer"; Flags: nowait postinstall skipifsilent; Check: not IsWorkTimerUpdate
-Filename: "{app}\WorkTimer.exe"; Parameters: "{code:UpdateArguments}"; Flags: nowait; Check: IsWorkTimerUpdate
+Filename: "{app}\WorkTimer.exe"; Parameters: "{code:UpdateArguments}"; Flags: nowait runasoriginaluser; Check: IsWorkTimerUpdate
 ; User history lives in LocalAppData\WorkTimer and is deliberately preserved by uninstall.
 
 [Code]
@@ -98,6 +99,12 @@ begin
     Result := False;
     Exit;
   end;
+  if ExpandConstant('{param:WORKTIMERHANDOFF|0}') = '1' then begin
+    if not SaveStringToFile(ExpandConstant('{src}\update-ready'), 'ready', False) then begin
+      Result := False;
+      Exit;
+    end;
+  end;
   ParentHandle := OpenProcess($00100000, False, ParentId);
   if ParentHandle = 0 then begin
     UpdateParentExited := GetLastError = 87;
@@ -127,6 +134,6 @@ begin
   if IsWorkTimerUpdate and UpdateParentExited and not UpdateCompleted then begin
     Target := ExpandConstant('{param:DIR}') + '\WorkTimer.exe';
     if FileExists(Target) then
-      Exec(Target, UpdateArguments(''), ExtractFileDir(Target), SW_SHOWNORMAL, ewNoWait, ResultCode);
+      ExecAsOriginalUser(Target, UpdateArguments(''), ExtractFileDir(Target), SW_SHOWNORMAL, ewNoWait, ResultCode);
   end;
 end;

@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 
 from app.product import RELEASES_URL, VERSION
 from app.services import ScenarioController
-from app.services.updates import Release, UpdateService, latest_release, version_parts
+from app.services.updates import Release, UpdateService, installed_directory, latest_release, version_parts
 from app.storage import SQLiteDatabase
 from app.web import create_web_app
 from core.events import EventBus
@@ -119,10 +119,16 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(self.service.status()["status"], "error")
         self.quit.assert_not_called()
 
-    def test_install_checks_hash_then_backs_up_and_launches_without_shell(self):
+    def test_install_checks_hash_then_waits_for_uac_before_backup_and_quit(self):
         self.offer()
         self.db.set_setting("private", "keep")
-        with patch("app.services.updates.open_github", return_value=io.BytesIO(PAYLOAD)), patch("app.services.updates.subprocess.Popen") as launch:
+        def authorize(*args, **kwargs):
+            self.assertEqual(self.service.status()["status"], "authorizing")
+            self.prepare.assert_not_called()
+            self.quit.assert_not_called()
+            self.assertFalse(list((self.root / "backups").glob("*before-update*.db")))
+
+        with patch("app.services.updates.open_github", return_value=io.BytesIO(PAYLOAD)), patch("app.services.updates.launch_installer", side_effect=authorize) as launch:
             self.service.install()
             self.service._worker.join(5)
         self.assertEqual(self.service.status()["status"], "installing")
@@ -132,6 +138,7 @@ class UpdateTests(unittest.TestCase):
         self.assertNotIn("shell", kwargs)
         self.assertIn(f"/DIR={self.root / 'Program Files'}", args[0])
         self.assertIn(f"/WORKTIMERDATA={self.root}", args[0])
+        self.assertIn("/WORKTIMERHANDOFF=1", args[0])
         self.assertTrue(list((self.root / "backups").glob("*before-update*.db")))
         self.assertEqual(self.db.get_setting("private"), "keep")
 
@@ -140,7 +147,7 @@ class UpdateTests(unittest.TestCase):
             self.offer()
             if content == b"not an exe":
                 self.service._release = Release(NEW_VERSION, self.release.url, len(content), hashlib.sha256(content).hexdigest())
-            with patch("app.services.updates.open_github", return_value=io.BytesIO(content)), patch("app.services.updates.subprocess.Popen") as launch:
+            with patch("app.services.updates.open_github", return_value=io.BytesIO(content)), patch("app.services.updates.launch_installer") as launch:
                 self.service.install()
                 self.service._worker.join(5)
             self.assertEqual(self.service.status()["status"], "error")
@@ -152,12 +159,27 @@ class UpdateTests(unittest.TestCase):
 
     def test_failed_launch_keeps_app_and_can_retry(self):
         self.offer()
-        with patch("app.services.updates.open_github", return_value=io.BytesIO(PAYLOAD)), patch("app.services.updates.subprocess.Popen", side_effect=OSError):
+        with patch("app.services.updates.open_github", return_value=io.BytesIO(PAYLOAD)), patch("app.services.updates.launch_installer", side_effect=OSError):
             self.service.install()
             self.service._worker.join(5)
         self.assertEqual(self.service.status()["status"], "error")
         self.quit.assert_not_called()
+        self.prepare.assert_not_called()
         self.assertEqual(self.db.get_setting("app_preferences", {}).get("auto_check_updates", True), True)
+
+    def test_cancelled_uac_keeps_timer_alive_without_backup_and_allows_retry(self):
+        self.offer()
+        with patch("app.services.updates.open_github", return_value=io.BytesIO(PAYLOAD)), patch("app.services.updates.launch_installer", side_effect=ValueError("Запрос Windows отменён")):
+            self.service.install()
+            self.service._worker.join(5)
+        self.assertEqual(self.service.status()["status"], "error")
+        self.prepare.assert_not_called()
+        self.quit.assert_not_called()
+        self.assertFalse(list((self.root / "backups").glob("*before-update*.db")))
+        with patch("app.services.updates.open_github", return_value=io.BytesIO(PAYLOAD)), patch("app.services.updates.launch_installer"):
+            self.service.install()
+            self.service._worker.join(5)
+        self.quit.assert_called_once()
 
     def test_portable_cannot_install_and_automatic_check_can_be_disabled(self):
         self.service.directory = None
@@ -196,6 +218,22 @@ class UpdateTests(unittest.TestCase):
         finally:
             controller.suspend_for_exit()
             timer.close()
+
+
+class InstalledDirectoryTests(unittest.TestCase):
+    def test_machine_install_and_legacy_user_install_match_running_exe_only(self):
+        import winreg
+
+        machine = Path("C:/Program Files/WorkTimer").resolve()
+        user = Path("C:/Users/Example/AppData/Local/Programs/WorkTimer").resolve()
+        for executable, expected in ((machine / "WorkTimer.exe", machine),
+                                     (user / "WorkTimer.exe", user),
+                                     (Path("C:/Portable/WorkTimer.exe"), None)):
+            with self.subTest(executable=executable), patch("sys.frozen", True, create=True), patch("sys.executable", str(executable)), patch("winreg.OpenKey") as open_key, patch("winreg.QueryValueEx", side_effect=[(str(machine), 1), (str(user), 1)]):
+                self.assertEqual(installed_directory(), expected)
+                self.assertEqual(open_key.call_args_list[0].args[0], winreg.HKEY_LOCAL_MACHINE)
+                if expected != machine:
+                    self.assertEqual(open_key.call_args_list[1].args[0], winreg.HKEY_CURRENT_USER)
 
 
 if __name__ == "__main__":
