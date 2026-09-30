@@ -1,0 +1,9 @@
+target-version = "py314"
+line-length = 120
+[lint]
+select = ["E4", "E7", "E9", "F", "I", "B", "UP", "SIM", "DTZ", "S110"]
+ignore = ["UP042", "UP046", "SIM105"]
+[lint.per-file-ignores]
+# Local calendar periods deliberately use the computer's local date.
+"app/storage/sqlite_database.py" = ["DTZ005", "DTZ011"]
+"tests/*.py" = ["DTZ011"]

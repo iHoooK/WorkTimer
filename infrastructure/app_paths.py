@@ -13,6 +13,9 @@ APP_NAME = "WorkTimer"
 
 
 def get_app_data_dir() -> str:
+    override = os.environ.get("WORKTIMER_DATA_DIR")
+    if override:
+        return str(Path(override).expanduser().resolve())
     base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
     if not base:
         base = str(Path.home() / "AppData" / "Local")

@@ -9,12 +9,13 @@ HotkeyManager принимает словарь {hotkey_str: Callable},
 from __future__ import annotations
 
 import logging
-from typing import Callable
+from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
 try:
     import keyboard as _keyboard
+
     _KEYBOARD_OK = True
 except ImportError:
     _KEYBOARD_OK = False
@@ -39,7 +40,7 @@ class HotkeyManager:
     """
 
     def __init__(self) -> None:
-        self._registered: list[str] = []   # список зарегистрированных хоткеев
+        self._registered: list[str] = []  # список зарегистрированных хоткеев
 
     @property
     def available(self) -> bool:
@@ -72,7 +73,8 @@ class HotkeyManager:
 
         logger.info(
             "HotkeyManager: зарегистрировано %d / %d хоткеев",
-            len(self._registered), len(hotkeys),
+            len(self._registered),
+            len(hotkeys),
         )
 
     def cleanup(self) -> None:

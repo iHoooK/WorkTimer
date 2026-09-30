@@ -6,9 +6,9 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from app.services import ScenarioController
 from app.storage.sqlite_database import SQLiteDatabase
 from app.web.server import ScenarioPayload, TaskGroupPayload, TaskPayload, create_web_app
-from app.services import ScenarioController
 from core.events import EventBus
 from core.timer import TimerEngine
 
@@ -33,7 +33,8 @@ class WebServerTests(unittest.TestCase):
         )
 
     def test_health_and_scenario_api(self) -> None:
-        self.assertEqual(self._endpoint("/api/health")(), {"status": "ok"})
+        self.assertEqual(self._endpoint("/api/health")()["status"], "ok")
+        self.assertEqual(self._endpoint("/api/health")()["app"], "WorkTimer")
         self.assertEqual(self._endpoint("/api/state")()["phase"], "idle")
         created = self._endpoint("/api/scenarios", "POST")(
             ScenarioPayload.model_validate(
@@ -62,7 +63,9 @@ class WebServerTests(unittest.TestCase):
         overlay = self._endpoint("/overlay/{overlay_name}")
         self.assertTrue(str(overlay("minimal").path).endswith("web\\overlays\\minimal.html"))
         self.assertTrue(str(overlay("progress").path).endswith("web\\overlays\\progress.html"))
-        with self.assertRaises(Exception):
+        from fastapi import HTTPException
+
+        with self.assertRaises(HTTPException):
             overlay("unknown")
 
     def test_scenario_api_persists_progress_configuration(self) -> None:
@@ -87,7 +90,7 @@ class WebServerTests(unittest.TestCase):
 
     def test_dashboard_and_assets_disable_cache(self) -> None:
         dashboard = self._endpoint("/")()
-        asset = self._endpoint("/assets/{asset_path:path}")("app.js")
+        asset = self._endpoint("/assets/{asset_path:path}")("modules/main.js")
         self.assertEqual(dashboard.headers["cache-control"], "no-store, max-age=0")
         self.assertEqual(asset.headers["cache-control"], "no-store, max-age=0")
 
@@ -96,7 +99,6 @@ class WebServerTests(unittest.TestCase):
         task = self._endpoint("/api/tasks", "POST")(TaskPayload(title="Новая панель", group_id=group["id"]))
         self.assertEqual(task["title"], "Новая панель")
         self.assertEqual(self._endpoint("/api/tasks")()["items"][0]["group_id"], group["id"])
-
 
     def test_creates_stream_preset(self) -> None:
         created = self._endpoint("/api/scenarios/presets/{preset_name}", "POST")("stream")

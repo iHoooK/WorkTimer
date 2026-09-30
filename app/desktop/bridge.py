@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import webbrowser
-import threading
 from collections.abc import Callable
 
 from app.services import ScenarioController
 from app.storage import SQLiteDatabase
 from core.events import Event, EventBus
-from core.timer import EVENT_FINISHED, EVENT_TICK, TimerState
+from core.timer import EVENT_FINISHED, EVENT_TICK, TimerMode, TimerState
 from infrastructure.hotkeys import HotkeyManager
 from infrastructure.notifications import NotificationService
 from infrastructure.sound import SoundService
@@ -44,20 +44,34 @@ class DesktopBridge:
         bus.subscribe(EVENT_TICK, self._on_tick)
         bus.subscribe(EVENT_FINISHED, self._on_finished)
 
-    def start(self) -> None:
-        self._hotkeys.register({
-            "ctrl+alt+space": self._controller.start,
-            "ctrl+alt+right": self._controller.next_phase,
-            "ctrl+alt+r": self._controller.start_from_beginning,
-        })
-        self._tray.setup(
-            on_show=self.open_dashboard,
-            on_start_pause=self._controller.start,
-            on_next=self._controller.next_phase,
-            on_restart=self._controller.start_from_beginning,
-            on_stop=self._controller.stop,
-            on_quit=self._on_quit,
-        )
+    def _safe_command(self, command):
+        def run():
+            try:
+                command()
+            except (ValueError, KeyError) as error:
+                logging.getLogger(__name__).info("Команда недоступна: %s", error)
+                self._notifications.notify("WorkTimer", str(error))
+
+        return run
+
+    def start(self, *, enable_tray: bool = True, enable_hotkeys: bool = True) -> None:
+        if enable_hotkeys:
+            self._hotkeys.register(
+                {
+                    "ctrl+alt+space": self._safe_command(self._controller.start),
+                    "ctrl+alt+right": self._safe_command(self._controller.next_phase),
+                    "ctrl+alt+r": self._safe_command(self._controller.start_from_beginning),
+                }
+            )
+        if enable_tray:
+            self._tray.setup(
+                on_show=self.open_dashboard,
+                on_start_pause=self._safe_command(self._controller.start),
+                on_next=self._safe_command(self._controller.next_phase),
+                on_restart=self._safe_command(self._controller.start_from_beginning),
+                on_stop=self._safe_command(self._controller.stop),
+                on_quit=self._on_quit,
+            )
 
     def stop(self) -> None:
         self._hotkeys.cleanup()
@@ -68,37 +82,44 @@ class DesktopBridge:
 
     def _on_tick(self, event: Event[TimerState]) -> None:
         state = event.data
+        if state.run_id != self._controller.to_dict()["run_id"]:
+            return
         self._tray.update_tooltip(f"WorkTimer — {state.phase_name} {state.format_time()}")
         preferences = self._database.get_setting("app_preferences", {})
         if not isinstance(preferences, dict):
             return
-        warning_seconds = int(preferences.get("warning_seconds", 0) or 0)
-        marker = (state.phase_name, state.total_seconds)
+        try:
+            warning_seconds = max(0, min(1800, int(preferences.get("warning_seconds", 0) or 0)))
+        except ValueError, TypeError:
+            warning_seconds = 0
+        marker = (state.phase_name, state.run_id)
         if state.remaining_seconds > warning_seconds:
             self._warning_marker = None
-        if warning_seconds and state.remaining_seconds == warning_seconds and self._warning_marker != marker:
+        if (
+            state.mode != TimerMode.FREE
+            and state.notification_enabled
+            and warning_seconds
+            and 0 < state.remaining_seconds <= warning_seconds
+            and self._warning_marker != marker
+        ):
             self._warning_marker = marker
             self._notifications.dnd = bool(preferences.get("dnd", False))
             self._notifications.notify("Скоро окончание", f"{state.phase_name}: осталось {warning_seconds} сек.")
 
     def _on_finished(self, event: Event[TimerState]) -> None:
         state = event.data
+        if state.run_id != self._controller.to_dict()["run_id"]:
+            return
         preferences = self._database.get_setting("app_preferences", {})
         if not isinstance(preferences, dict):
             preferences = {}
         self._notifications.dnd = bool(preferences.get("dnd", False))
-        if not bool(preferences.get("sound_enabled", True)):
-            self._notifications.notify("Фаза завершена", f"{state.phase_name}: выберите следующее действие в WorkTimer.")
-            if bool(preferences.get("auto_start_next_phase", False)):
-                threading.Timer(0.25, self._controller.next_phase).start()
-            return
-        if state.phase_role.casefold() == "rest":
-            self._sound.play_break_end()
-        else:
-            self._sound.play_work_end()
-        self._notifications.notify(
-            "Фаза завершена",
-            f"{state.phase_name}: выберите следующее действие в WorkTimer.",
-        )
-        if bool(preferences.get("auto_start_next_phase", False)):
-            threading.Timer(0.25, self._controller.next_phase).start()
+        if state.sound_enabled and bool(preferences.get("sound_enabled", True)):
+            if state.phase_role.casefold() == "rest":
+                self._sound.play_break_end()
+            else:
+                self._sound.play_work_end()
+        if state.notification_enabled:
+            self._notifications.notify(
+                "Фаза завершена", f"{state.phase_name}: выберите следующее действие в WorkTimer."
+            )

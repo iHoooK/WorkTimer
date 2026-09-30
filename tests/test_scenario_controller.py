@@ -4,8 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from app.domain.models import Phase, PhaseRepeatPolicy, Scenario
 from app.domain import Task
+from app.domain.models import Phase, PhaseRepeatPolicy, Scenario
 from app.services import ScenarioController
 from app.storage import SQLiteDatabase
 from core.events import EventBus
@@ -34,7 +34,8 @@ class ScenarioControllerTests(unittest.TestCase):
         self.controller.select_scenario(saved.id or 0)
 
     def tearDown(self) -> None:
-        self.timer.stop()
+        self.controller.stop()
+        self.timer.close()
         self._temp.cleanup()
 
     def test_once_at_start_is_skipped_after_first_cycle(self) -> None:

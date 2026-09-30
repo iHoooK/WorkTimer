@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from dataclasses import dataclass, field
-from typing import Callable, Generic, TypeVar
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Generic, TypeVar
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +28,9 @@ class Event(Generic[T]):
     Пример использования:
         tick_event = Event(name="timer.tick", data=TimerState(...))
     """
-    name: str          # Уникальное имя события, например "timer.tick"
-    data: T            # Полезная нагрузка — типизированные данные
+
+    name: str  # Уникальное имя события, например "timer.tick"
+    data: T  # Полезная нагрузка — типизированные данные
 
 
 # Тип подписчика: принимает Event[T], ничего не возвращает
@@ -89,9 +91,7 @@ class EventBus:
             try:
                 handler(event)
             except Exception:  # noqa: BLE001
-                logger.exception(
-                    "EventBus: ошибка в обработчике '%s' (%s)", event.name, handler
-                )
+                logger.exception("EventBus: ошибка в обработчике '%s' (%s)", event.name, handler)
 
     def clear(self) -> None:
         """Удалить все подписки. Используется при завершении приложения."""

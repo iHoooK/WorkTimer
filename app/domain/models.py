@@ -106,11 +106,17 @@ class Scenario:
             raise ValueError("Название сценария длиннее 80 символов")
         if not self.phases:
             raise ValueError("Сценарий должен содержать хотя бы одну фазу")
+        if len(self.phases) > 100:
+            raise ValueError("В сценарии не может быть больше 100 фаз")
         if not 0 <= self.progress_total <= 100:
             raise ValueError("Количество рабочих фаз должно быть от 0 до 100")
         progress_markers = sum(phase.progress_marker for phase in self.phases)
         if self.progress_total and progress_markers != 1:
             raise ValueError("Для конечного цикла отметьте одну рабочую фазу")
+        if self.progress_total and any(
+            p.progress_marker and p.repeat_policy is not PhaseRepeatPolicy.EVERY_CYCLE for p in self.phases
+        ):
+            raise ValueError("Рабочая фаза конечного сценария должна повторяться каждый цикл")
         if not self.progress_total and progress_markers:
             raise ValueError("Сначала укажите количество рабочих фаз")
         if not any(p.repeat_policy is not PhaseRepeatPolicy.DISABLED for p in self.phases):

@@ -44,9 +44,7 @@ class SQLiteDatabaseTests(unittest.TestCase):
                 {
                     "active_profile": "Работа",
                     "profiles": {
-                        "Работа": {
-                            "phases": [{"name": "Работа", "duration_seconds": 1500, "color_role": "work"}]
-                        }
+                        "Работа": {"phases": [{"name": "Работа", "duration_seconds": 1500, "color_role": "work"}]}
                     },
                 },
                 ensure_ascii=False,
@@ -76,7 +74,6 @@ class SQLiteDatabaseTests(unittest.TestCase):
         self.database.archive_scenario(saved.id or 0)
         self.assertTrue(self.database.get_scenario(saved.id or 0).is_archived)
 
-
     def test_editing_scenario_keeps_existing_time_entry(self) -> None:
         saved = self.database.save_scenario(Scenario("Focus", (Phase("Work", 60),)))
         entry_id = self.database.create_time_entry(
@@ -91,7 +88,7 @@ class SQLiteDatabaseTests(unittest.TestCase):
         history = self.database.list_time_entries()
         self.assertEqual(history[0]["elapsed_seconds"], 42)
         self.assertEqual(history[0]["scenario_name"], "Focus")
-        self.assertIsNone(history[0]["phase_name"])
+        self.assertEqual(history[0]["phase_name"], "Work")
 
 
 if __name__ == "__main__":

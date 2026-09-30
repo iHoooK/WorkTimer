@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 # Импортируем plyer один раз при загрузке модуля
 try:
     from plyer import notification as _plyer_notification
+
     _PLYER_OK = True
 except ImportError:
     _PLYER_OK = False

@@ -1,64 +1,33 @@
-"""
-core/timer.py — Чистая логика таймера обратного отсчёта.
-
-Никакого tkinter, никакого UI. Только счёт времени и публикация событий.
-TimerEngine работает в daemon-потоке и общается с внешним миром
-исключительно через EventBus.
-
-SOLID:
-  S — Engine только считает время, не знает ни о звуке, ни об UI.
-  D — Зависит от абстракции EventBus, не от конкретного UI-класса.
-"""
+"""Clock-based timer. Delayed subscribers never slow the countdown."""
 
 from __future__ import annotations
 
-import logging
+import math
 import threading
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from core.events import EventBus
+from core.events import Event, EventBus
 
-logger = logging.getLogger(__name__)
-
-
-# ===========================================================================
-# Шаг 2.1 — TimerState
-# ===========================================================================
 
 class TimerMode(str, Enum):
-    """Режим таймера: работа или перерыв."""
-    WORK  = "work"
+    WORK = "work"
     BREAK = "break"
     CUSTOM = "custom"
     FREE = "free"
 
 
 class TimerPhase(str, Enum):
-    """Фаза жизненного цикла таймера."""
-    IDLE     = "idle"      # Не запущен / сброшен
-    RUNNING  = "running"   # Тикает
-    PAUSED   = "paused"    # Приостановлен
-    FINISHED = "finished"  # Обратный отсчёт достиг нуля
+    IDLE = "idle"
+    RUNNING = "running"
+    PAUSED = "paused"
+    FINISHED = "finished"
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class TimerState:
-    """
-    Иммутабельный (по соглашению) снимок состояния таймера.
-
-    Публикуется с каждым событием timer.tick и timer.finished.
-    Не frozen — чтобы не создавать лишние объекты; не изменяй снаружи.
-
-    Поля:
-        mode             — режим (work / break)
-        phase            — текущая фаза (idle / running / paused / finished)
-        remaining_seconds — сколько секунд осталось
-        total_seconds    — изначальная длительность
-        elapsed_seconds  — сколько секунд прошло
-    """
     mode: TimerMode
     phase: TimerPhase
     phase_name: str
@@ -66,17 +35,14 @@ class TimerState:
     remaining_seconds: int
     total_seconds: int
     elapsed_seconds: int
-
-    # ------------------------------------------------------------------
-    # Вычисляемые свойства — удобны для UI
-    # ------------------------------------------------------------------
+    run_id: int = 0
+    elapsed_precise: float = 0
+    sound_enabled: bool = True
+    notification_enabled: bool = True
 
     @property
     def progress(self) -> float:
-        """Прогресс от 0.0 (начало) до 1.0 (завершение)."""
-        if self.total_seconds == 0:
-            return 0.0
-        return min(self.elapsed_seconds / self.total_seconds, 1.0)
+        return min(self.elapsed_precise / self.total_seconds, 1.0) if self.total_seconds else 0.0
 
     @property
     def is_running(self) -> bool:
@@ -95,82 +61,64 @@ class TimerState:
         return self.phase == TimerPhase.FINISHED
 
     def format_time(self) -> str:
-        """Форматировать remaining_seconds как MM:SS. Например: '24:59'."""
         value = self.elapsed_seconds if self.mode == TimerMode.FREE else self.remaining_seconds
-        m, s = divmod(max(value, 0), 60)
-        return f"{m:02d}:{s:02d}"
-
-    def __repr__(self) -> str:
-        return (
-            f"TimerState({self.phase.value}, {self.format_time()}, "
-            f"mode={self.mode.value}, phase={self.phase_name!r}, progress={self.progress:.0%})"
-        )
+        minutes, seconds = divmod(max(value, 0), 60)
+        return f"{minutes:02d}:{seconds:02d}"
 
 
-# ===========================================================================
-# Константы имён событий (избегаем опечаток через строки в коде)
-# ===========================================================================
+EVENT_TICK = "timer.tick"
+EVENT_FINISHED = "timer.finished"
+EVENT_STARTED = "timer.started"
+EVENT_PAUSED = "timer.paused"
+EVENT_RESUMED = "timer.resumed"
+EVENT_STOPPED = "timer.stopped"
 
-EVENT_TICK     = "timer.tick"      # Каждую секунду; data: TimerState
-EVENT_FINISHED = "timer.finished"  # Обратный отсчёт достиг нуля; data: TimerState
-EVENT_STARTED  = "timer.started"   # Таймер запущен; data: TimerState
-EVENT_PAUSED   = "timer.paused"    # Поставлен на паузу; data: TimerState
-EVENT_RESUMED  = "timer.resumed"   # Возобновлён; data: TimerState
-EVENT_STOPPED  = "timer.stopped"   # Принудительно остановлен; data: TimerState
-
-
-# ===========================================================================
-# Шаг 2.2 — TimerEngine
-# ===========================================================================
 
 class TimerEngine:
-    """
-    Движок таймера обратного отсчёта.
+    # Countdown includes system sleep; a paused timer excludes all paused time.
+    _TICK_INTERVAL = 0.2
 
-    Работает в отдельном daemon-потоке — не блокирует UI.
-    Общается с внешним миром исключительно через EventBus (DIP).
-
-    Жизненный цикл:
-        IDLE → start() → RUNNING → pause() → PAUSED → resume() → RUNNING
-                                           → stop()  → IDLE
-                                           → (0 сек) → FINISHED
-
-    Пример:
-        engine = TimerEngine(bus=event_bus)
-        engine.start(duration_seconds=25 * 60, mode=TimerMode.WORK)
-        # ...
-        engine.pause()
-        engine.resume()
-        engine.stop()
-    """
-
-    _TICK_INTERVAL = 1.0  # интервал между тиками, секунды
-
-    def __init__(self, bus: "EventBus") -> None:
+    def __init__(self, bus: EventBus, *, clock: Callable[[], float] = time.monotonic) -> None:
         self._bus = bus
-
-        # Поток
+        self._clock = clock
+        self._lock = threading.RLock()
         self._thread: threading.Thread | None = None
-        self._stop_event  = threading.Event()
-        self._pause_event = threading.Event()
-        self._pause_event.set()  # изначально — не на паузе
+        self._stop_event = threading.Event()
+        self._run_id = 0
+        self._mode = TimerMode.WORK
+        self._phase = TimerPhase.IDLE
+        self._phase_name = "Готов к началу"
+        self._phase_role = "work"
+        self._total_seconds = 0
+        self._elapsed = 0.0
+        self._anchor: float | None = None
+        self._sound_enabled = True
+        self._notification_enabled = True
 
-        # Состояние
-        self._mode              = TimerMode.WORK
-        self._phase_name        = "Работа"
-        self._phase_role        = "work"
-        self._total_seconds     = 0
-        self._remaining_seconds = 0
-        self._elapsed_seconds   = 0
-        self._phase             = TimerPhase.IDLE
-        self._count_up          = False
+    def _elapsed_now(self) -> float:
+        elapsed = self._elapsed
+        if self._phase == TimerPhase.RUNNING and self._anchor is not None:
+            elapsed += max(0, self._clock() - self._anchor)
+        return elapsed if self._mode == TimerMode.FREE else min(elapsed, self._total_seconds)
 
-        # Мьютекс для безопасного чтения состояния из UI-потока
-        self._lock = threading.Lock()
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
+    @property
+    def state(self) -> TimerState:
+        with self._lock:
+            elapsed = self._elapsed_now()
+            remaining = 0 if self._mode == TimerMode.FREE else math.ceil(max(0, self._total_seconds - elapsed))
+            return TimerState(
+                self._mode,
+                self._phase,
+                self._phase_name,
+                self._phase_role,
+                remaining,
+                self._total_seconds,
+                int(elapsed),
+                self._run_id,
+                elapsed,
+                self._sound_enabled,
+                self._notification_enabled,
+            )
 
     def start(
         self,
@@ -180,185 +128,125 @@ class TimerEngine:
         phase_name: str = "",
         phase_role: str | None = None,
         count_up: bool = False,
+        sound_enabled: bool = True,
+        notification_enabled: bool = True,
+        elapsed_seconds: float = 0,
+        paused: bool = False,
     ) -> None:
-        """
-        Запустить таймер заново.
-
-        Если таймер уже работает — сначала корректно останавливает его.
-
-        Args:
-            duration_seconds: длительность в секундах, должна быть > 0.
-            mode: TimerMode.WORK, TimerMode.BREAK или TimerMode.CUSTOM.
-            phase_name: человекочитаемое имя текущей фазы.
-            phase_role: цветовая роль фазы для UI.
-
-        Raises:
-            ValueError: если duration_seconds <= 0.
-        """
         if duration_seconds <= 0 and not count_up:
-            raise ValueError(
-                f"duration_seconds должен быть > 0, получено: {duration_seconds}"
-            )
-
-        self.stop()  # безопасно — ничего не делает если уже остановлен
-
+            raise ValueError("Длительность должна быть больше нуля")
+        self.stop()
         with self._lock:
-            self._mode              = mode
-            self._phase_name        = phase_name.strip() or self._default_phase_name(mode)
-            self._phase_role        = (phase_role or mode.value).strip() or mode.value
-            self._total_seconds     = duration_seconds
-            self._remaining_seconds = 0 if count_up else duration_seconds
-            self._elapsed_seconds   = 0
-            self._phase             = TimerPhase.RUNNING
-            self._count_up          = count_up
-
-        self._stop_event.clear()
-        self._pause_event.set()
-
-        self._thread = threading.Thread(
-            target=self._run,
-            name="TimerEngine",
-            daemon=True,  # поток умирает вместе с приложением
-        )
-        self._thread.start()
-
+            self._run_id += 1
+            self._mode = TimerMode.FREE if count_up else mode
+            self._phase = TimerPhase.PAUSED if paused else TimerPhase.RUNNING
+            self._phase_name = (
+                phase_name.strip()
+                or {
+                    TimerMode.WORK: "Работа",
+                    TimerMode.BREAK: "Отдых",
+                    TimerMode.CUSTOM: "Фаза",
+                    TimerMode.FREE: "Свободная работа",
+                }[self._mode]
+            )
+            self._phase_role = phase_role or mode.value
+            self._total_seconds = duration_seconds
+            self._elapsed = max(0, float(elapsed_seconds))
+            self._anchor = None if paused else self._clock()
+            self._sound_enabled = sound_enabled
+            self._notification_enabled = notification_enabled
+            self._stop_event = threading.Event()
+            event = self._stop_event
+            run_id = self._run_id
+            self._thread = threading.Thread(target=self._run, args=(event, run_id), name="WorkTimer-clock", daemon=True)
+            self._thread.start()
         self._publish(EVENT_STARTED)
-        logger.info("TimerEngine: старт [%s] %ds", mode.value, duration_seconds)
 
-    def start_free(self, *, phase_name: str = "Свободная работа", phase_role: str = "work") -> None:
-        self.start(0, mode=TimerMode.FREE, phase_name=phase_name, phase_role=phase_role, count_up=True)
+    def start_free(
+        self,
+        *,
+        phase_name: str = "Свободная работа",
+        phase_role: str = "work",
+        elapsed_seconds: float = 0,
+        paused: bool = False,
+    ) -> None:
+        self.start(
+            0,
+            TimerMode.FREE,
+            phase_name=phase_name,
+            phase_role=phase_role,
+            count_up=True,
+            elapsed_seconds=elapsed_seconds,
+            paused=paused,
+        )
 
     def pause(self) -> None:
-        """
-        Поставить таймер на паузу.
-
-        Игнорирует вызов если таймер не запущен.
-        """
         with self._lock:
             if self._phase != TimerPhase.RUNNING:
                 return
+            self._elapsed = self._elapsed_now()
+            self._anchor = None
             self._phase = TimerPhase.PAUSED
-
-        self._pause_event.clear()  # поток встанет на wait()
         self._publish(EVENT_PAUSED)
-        logger.info("TimerEngine: пауза (%ds осталось)", self._remaining_seconds)
 
     def resume(self) -> None:
-        """
-        Возобновить таймер с паузы.
-
-        Игнорирует вызов если таймер не на паузе.
-        """
         with self._lock:
             if self._phase != TimerPhase.PAUSED:
                 return
+            self._anchor = self._clock()
             self._phase = TimerPhase.RUNNING
-
-        self._pause_event.set()  # поток продолжит цикл
         self._publish(EVENT_RESUMED)
-        logger.info("TimerEngine: возобновление")
 
     def stop(self) -> None:
-        """
-        Принудительно остановить таймер и дождаться завершения потока.
-
-        Безопасно вызывать в любой момент, в том числе если таймер уже остановлен.
-        """
-        if self._thread is None or not self._thread.is_alive():
-            return
-
+        # Do not join: a worker may be delivering a callback waiting for the
+        # controller's command lock. Each worker has its own cancellation event.
         with self._lock:
-            prev_phase  = self._phase
+            previous = self._phase
+            self._elapsed = self._elapsed_now()
+            self._anchor = None
             self._phase = TimerPhase.IDLE
+            self._stop_event.set()
+            snapshot = self.state
+        if previous in (TimerPhase.RUNNING, TimerPhase.PAUSED):
+            self._bus.publish(Event(EVENT_STOPPED, snapshot))
 
-        self._pause_event.set()   # разбудить поток если он ждёт на паузе
-        self._stop_event.set()    # сигнал: выйти из цикла
-        self._thread.join(timeout=2.0)
-        self._thread = None
+    def close(self) -> None:
+        self.stop()
+        thread = self._thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=5)
 
-        if prev_phase not in (TimerPhase.IDLE, TimerPhase.FINISHED):
-            self._publish(EVENT_STOPPED)
-
-        logger.info("TimerEngine: остановлен")
-
-    @property
-    def state(self) -> TimerState:
-        """Текущий снимок состояния (thread-safe)."""
+    def restore_finished(self) -> None:
         with self._lock:
-            return TimerState(
-                mode=self._mode,
-                phase=self._phase,
-                phase_name=self._phase_name,
-                phase_role=self._phase_role,
-                remaining_seconds=self._remaining_seconds,
-                total_seconds=self._total_seconds,
-                elapsed_seconds=self._elapsed_seconds,
-            )
+            self._elapsed = float(self._total_seconds)
+            self._anchor = None
+            self._phase = TimerPhase.FINISHED
+            self._stop_event.set()
 
-    # ------------------------------------------------------------------
-    # Приватный цикл потока
-    # ------------------------------------------------------------------
-
-    def _run(self) -> None:
-        """Основной цикл таймера. Запускается в daemon-потоке."""
-        while not self._stop_event.is_set():
-
-            # Ожидание если на паузе (без CPU spin — блокирующий wait)
-            self._pause_event.wait()
-
-            if self._stop_event.is_set():
-                break
-
-            # Ждём ровно 1 секунду (или до stop_event)
-            was_stopped = self._stop_event.wait(timeout=self._TICK_INTERVAL)
-            if was_stopped:
-                break
-
-            # Перепроверяем: за время ожидания мог прийти pause()
-            if not self._pause_event.is_set():
-                continue
-
-            # Обновляем счётчики
+    def _run(self, cancelled: threading.Event, run_id: int) -> None:
+        last_second = -1
+        while not cancelled.wait(self._TICK_INTERVAL):
             with self._lock:
-                self._elapsed_seconds   += 1
-                if self._count_up:
-                    self._remaining_seconds = self._elapsed_seconds
-                    finished = False
-                else:
-                    self._remaining_seconds -= 1
-                    finished = self._remaining_seconds <= 0
-                    if finished:
-                        self._remaining_seconds = 0
-                        self._phase = TimerPhase.FINISHED
-
-            # Публикуем tick в любом случае
-            self._publish(EVENT_TICK)
-
+                if run_id != self._run_id or self._phase == TimerPhase.IDLE:
+                    return
+                if self._phase != TimerPhase.RUNNING:
+                    continue
+                elapsed = self._elapsed_now()
+                finished = self._mode != TimerMode.FREE and elapsed >= self._total_seconds
+                if finished:
+                    self._elapsed = float(self._total_seconds)
+                    self._anchor = None
+                    self._phase = TimerPhase.FINISHED
+                snapshot = self.state
+            if cancelled.is_set():
+                return
+            if snapshot.elapsed_seconds != last_second or finished:
+                last_second = snapshot.elapsed_seconds
+                self._bus.publish(Event(EVENT_TICK, snapshot))
             if finished:
-                self._publish(EVENT_FINISHED)
-                logger.info("TimerEngine: завершён [%s]", self._mode.value)
-                break
+                if not cancelled.is_set():
+                    self._bus.publish(Event(EVENT_FINISHED, snapshot))
+                return
 
-    def _publish(self, event_name: str) -> None:
-        """Опубликовать текущее состояние как событие на шине."""
-        # Локальный импорт — разрываем возможный циклический импорт
-        from core.events import Event
-        self._bus.publish(Event(name=event_name, data=self.state))
-
-    @staticmethod
-    def _default_phase_name(mode: TimerMode) -> str:
-        if mode == TimerMode.BREAK:
-            return "Отдых"
-        if mode == TimerMode.CUSTOM:
-            return "Фаза"
-        if mode == TimerMode.FREE:
-            return "Свободная работа"
-        return "Работа"
-
-    def __repr__(self) -> str:
-        s = self.state
-        return (
-            f"TimerEngine(phase={s.phase.value}, "
-            f"remaining={s.format_time()}, "
-            f"mode={s.mode.value})"
-        )
+    def _publish(self, name: str) -> None:
+        self._bus.publish(Event(name, self.state))

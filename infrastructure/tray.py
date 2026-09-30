@@ -9,13 +9,14 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Callable
+from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
 try:
     import pystray
     from PIL import Image, ImageDraw
+
     _PYSTRAY_OK = True
 except ImportError:
     _PYSTRAY_OK = False
@@ -43,7 +44,7 @@ class TrayManager:
     """
 
     def __init__(self) -> None:
-        self._icon     = None
+        self._icon = None
         self._available = _PYSTRAY_OK
 
     @property
@@ -57,12 +58,12 @@ class TrayManager:
 
     def setup(
         self,
-        on_show:        Callable,
+        on_show: Callable,
         on_start_pause: Callable,
-        on_stop:        Callable,
-        on_quit:        Callable,
-        on_next:        Callable | None = None,
-        on_restart:     Callable | None = None,
+        on_stop: Callable,
+        on_quit: Callable,
+        on_next: Callable | None = None,
+        on_restart: Callable | None = None,
     ) -> None:
         """
         Создать иконку и запустить её в daemon-потоке.
@@ -72,7 +73,7 @@ class TrayManager:
         if not _PYSTRAY_OK:
             return
         try:
-            img  = self._make_icon_image()
+            img = self._make_icon_image()
             menu_items = [
                 pystray.MenuItem("Открыть панель", lambda i, it: on_show(), default=True),
                 pystray.MenuItem("Старт / Пауза", lambda i, it: on_start_pause()),
@@ -81,13 +82,15 @@ class TrayManager:
                 menu_items.append(pystray.MenuItem("Следующая фаза", lambda i, it: on_next()))
             if on_restart is not None:
                 menu_items.append(pystray.MenuItem("Начать сначала", lambda i, it: on_restart()))
-            menu_items.extend([
-                pystray.MenuItem("Стоп", lambda i, it: on_stop()),
-                pystray.Menu.SEPARATOR,
-                pystray.MenuItem("Выход", lambda i, it: on_quit()),
-            ])
+            menu_items.extend(
+                [
+                    pystray.MenuItem("Стоп", lambda i, it: on_stop()),
+                    pystray.Menu.SEPARATOR,
+                    pystray.MenuItem("Выход", lambda i, it: on_quit()),
+                ]
+            )
             menu = pystray.Menu(*menu_items)
-            self._icon = pystray.Icon("focus_timer", img, "Focus Timer", menu)
+            self._icon = pystray.Icon("worktimer", img, "WorkTimer", menu)
             threading.Thread(
                 target=self._icon.run,
                 daemon=True,
@@ -113,7 +116,7 @@ class TrayManager:
             try:
                 self._icon.stop()
             except Exception:
-                pass
+                logger.exception("TrayManager: ошибка завершения")
             self._icon = None
             logger.info("TrayManager: остановлен")
 
@@ -123,11 +126,12 @@ class TrayManager:
 
     @staticmethod
     def _make_icon_image():
-        """Создать PIL-изображение: оранжевый круг с белым треугольником (play)."""
+        """WorkTimer clock icon, shared with the packaged application."""
         img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
-        d   = ImageDraw.Draw(img)
-        d.ellipse([4, 4, 60, 60], fill="#e05c3a")
-        d.polygon([(24, 18), (24, 46), (48, 32)], fill="white")
+        d = ImageDraw.Draw(img)
+        d.ellipse([4, 4, 60, 60], fill="#22c7ff")
+        d.ellipse([10, 10, 54, 54], fill="#07111c")
+        d.line([(32, 17), (32, 32), (43, 39)], fill="#eaf2f8", width=5)
         return img
 
     def __repr__(self) -> str:

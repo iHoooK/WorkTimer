@@ -34,7 +34,6 @@ class TaskStorageTests(unittest.TestCase):
         self.assertEqual(self.database.time_summary_by_day()[0]["elapsed_seconds"], 600)
         self.assertEqual(self.database.list_time_entries()[0]["task_title"], "Аналитика")
 
-
     def test_task_tags_round_trip(self) -> None:
         task = self.database.save_task(Task("OBS", tags=("stream", "urgent")))
         self.assertEqual(task.tags, ("stream", "urgent"))

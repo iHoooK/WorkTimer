@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 # Шаг 6.1 — ISoundStrategy (ABC) + WinsoundStrategy + SilentStrategy
 # ===========================================================================
 
+
 class ISoundStrategy(ABC):
     """Абстракция звуковой стратегии (Liskov: все подклассы взаимозаменяемы)."""
 
@@ -48,6 +49,7 @@ class WinsoundStrategy(ISoundStrategy):
     def play_work_end(self) -> None:
         try:
             import winsound
+
             for _ in range(3):
                 winsound.Beep(880, 200)
                 time.sleep(0.1)
@@ -57,6 +59,7 @@ class WinsoundStrategy(ISoundStrategy):
     def play_break_end(self) -> None:
         try:
             import winsound
+
             for _ in range(2):
                 winsound.Beep(523, 300)
                 time.sleep(0.15)
@@ -78,6 +81,7 @@ class SilentStrategy(ISoundStrategy):
 # Шаг 6.2 — SoundService
 # ===========================================================================
 
+
 class SoundService:
     """
     Сервис воспроизведения звука.
@@ -94,7 +98,7 @@ class SoundService:
 
     def __init__(self, strategy: ISoundStrategy, enabled: bool = True) -> None:
         self._strategy = strategy
-        self.enabled   = enabled
+        self.enabled = enabled
 
     # ------------------------------------------------------------------
     # Public API
@@ -131,7 +135,4 @@ class SoundService:
             logger.exception("SoundService: ошибка воспроизведения")
 
     def __repr__(self) -> str:
-        return (
-            f"SoundService(strategy={self._strategy.__class__.__name__}, "
-            f"enabled={self.enabled})"
-        )
+        return f"SoundService(strategy={self._strategy.__class__.__name__}, enabled={self.enabled})"
